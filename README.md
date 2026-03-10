@@ -1,3 +1,5 @@
+[![CI](https://github.com/wiseops-team/mneme/actions/workflows/ci.yml/badge.svg)](https://github.com/wiseops-team/mneme/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 # **mneme** - MySQL Native Ephemeral Management Engine
 
 **Production-Grade Backup & Disaster Recovery as Code for MariaDB.**
@@ -8,6 +10,21 @@ It includes a dedicated custom Ansible module (`mneme_restore`) that enables **D
 ## Quick Start
 
 To get a simple daily backup running, add the role to your playbook and configure the database password.
+
+## Quick Start
+
+**0. Install the role**
+
+The recommended way to install is via a `requirements.yml` file:
+
+```yaml
+---
+roles:
+  - name: wiseops_team.mneme
+    src: https://github.com/wiseops-team/mneme.git
+    scm: git
+    version: main # Or specify a release tag, e.g., 2.0.0
+```
 
 **1. Add to your Playbook:**
 ```yaml
@@ -216,4 +233,4 @@ Maintained by:
 
 ### Contributors
 
-- Ivan Gumeniuk (IMHIO LTD)
+- Ivan Gumeniuk (WiseOps)
