@@ -1,6 +1,6 @@
 ## [2.0.0] - 2026-02-22
 
-This is a major architectural release. `mariabackup` has evolved from a simple cron-job configuration tool into a comprehensive **Disaster Recovery as Code** solution. 
+This is a major architectural release. `mneme` has evolved from a simple cron-job configuration tool into a comprehensive **Disaster Recovery as Code** solution. 
 
 ### Major Features (New)
 * **Declarative Recovery (`mneme_restore`):** Introduced a native custom Ansible module to handle database restoration. No more manual CLI scripts. Supports four recovery strategies: `sidecar`, `direct`, `copy_back`, and `move_back`.

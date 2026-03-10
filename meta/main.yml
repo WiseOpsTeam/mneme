@@ -5,13 +5,9 @@ galaxy_info:
   namespace: wiseops_team
   description: MySQL Native Ephemeral Management Engine (mneme). A role to manage MariaDB backups using mariabackup.
   license: MIT
-  min_ansible_version: 2.9
+  min_ansible_version: "2.16"
   platforms:
     - name: EL
-      versions:
-        - 8
-        - 9
-    - name: Rocky
       versions:
         - 8
         - 9
@@ -22,3 +18,7 @@ galaxy_info:
     - mysql
     - disaster-recovery
     - mariabackup
+  issue_tracker_url: https://github.com/wiseops-team/mneme/issues
+  repository: https://github.com/wiseops-team/mneme
+
+dependencies: []
