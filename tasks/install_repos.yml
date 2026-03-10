@@ -1,7 +1,7 @@
 ---
 
 - name: Add official MariaDB repository
-  yum_repository:
+  ansible.builtin.yum_repository:
     name: MariaDB
     description: "Official MariaDB repository"
     baseurl: "{{ mneme_mariadb_repo_url_rocky_8_9 }}"
@@ -14,7 +14,7 @@
     - ansible_distribution_major_version | int > 7
 
 - name: Add official MariaDB repository
-  yum_repository:
+  ansible.builtin.yum_repository:
     name: MariaDB
     description: "Official MariaDB repository"
     baseurl: "{{ mneme_mariadb_repo_url_rhel_9 }}"
@@ -27,7 +27,7 @@
     - ansible_distribution_major_version | int >= 9
 
 - name: Add MariaDB archive repository for deprecated OS
-  yum_repository:
+  ansible.builtin.yum_repository:
     name: MariaDB_archive
     description: "MariaDB {{ mneme_mariadb_version }} archive repository"
     baseurl: "{{ mneme_mariadb_repo_url_ol_7 }}"
@@ -48,7 +48,7 @@
     - ansible_distribution_major_version | int <= 7
 
 - name: Install repository key
-  rpm_key:
+  ansible.builtin.rpm_key:
     state: present
     key: "{{ mneme_epel_repo_key_url }}"
   when:
@@ -57,7 +57,7 @@
     - ansible_distribution_major_version | int <= 7
 
 - name: Install EPEL repo package from a remote repo for deprecated OS
-  yum:
+  ansible.builtin.yum:
     name: "{{ mneme_epel_repo_archive_url }}"
     state: present
   register: result

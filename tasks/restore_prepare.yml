@@ -17,6 +17,9 @@
 # 1. Auto-Discovery (Cascade: Checksum -> Raw File)
 # =============================================================================
 - name: "RESTORE_PREPARE | Auto-discover latest backup (Scoped Cascade)"
+  when:
+    - mneme_restore_target_date is defined
+    - mneme_restore_target_date == 'latest'
   block:
     # ---------------------------------------------------------
     # STEP 1: Attempt to find safe checksum markers (.sha256)
@@ -88,11 +91,6 @@
           - "RISK: If a backup is currently running, this might pick an incomplete file."
           - "ADVICE: Enable 'mneme_generate_checksum: true' for atomic safety."
       when: not _is_safe_mode
-
-  # Trigger block only if input is 'latest'
-  when:
-    - mneme_restore_target_date is defined
-    - mneme_restore_target_date == 'latest'
 
 # =============================================================================
 # 2. Validation & Constants
@@ -238,6 +236,7 @@
         path: "{{ _r_marker_file }}"
         state: touch
         owner: "{{ mneme_system_user | default('mysql') }}"
+        mode: '0600'
 
 
 

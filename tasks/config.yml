@@ -2,7 +2,7 @@
 # Handle configuration deployment
 
 - name: Deploy mariabackup configuration
-  template:
+  ansible.builtin.template:
     src: mariabackup.cnf.j2
     dest: /etc/mariabackup.cnf
     owner: root
@@ -12,7 +12,7 @@
   no_log: true
 
 - name: Deploy xtrabackup configuration
-  template:
+  ansible.builtin.template:
     src: mariabackup.cnf.j2
     dest: /etc/xtrabackup.cnf
     owner: root

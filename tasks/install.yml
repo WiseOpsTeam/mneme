@@ -2,7 +2,7 @@
 # Handle package installation
 
 - name: Install mariadb-backup on RHEL/CentOS/OL
-  yum:
+  ansible.builtin.yum:
     name: MariaDB-backup
     state: present
   when: not mneme_xtrabackup_compatibility
@@ -16,7 +16,7 @@
   ignore_errors: "{{ mneme_xtrabackup_compatibility }}"
 
 - name: Install pigz (parallel version of gzip)
-  yum:
+  ansible.builtin.yum:
     name: pigz
     state: present
   register: pigz_install_result
@@ -27,7 +27,7 @@
   ignore_errors: false
 
 - name: Ensure cronie for crontab is installed
-  yum:
+  ansible.builtin.yum:
     name: cronie
     state: present
   register: cronie_install_result
@@ -38,7 +38,7 @@
   ignore_errors: false
 
 - name: Verify MariaDB backup binary exists
-  stat:
+  ansible.builtin.stat:
     path: "{{ mneme_bin_path }}"
   register: mneme_bin_stat
   failed_when: 
