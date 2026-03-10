@@ -1,10 +1,12 @@
 [![CI](https://github.com/wiseops-team/mneme/actions/workflows/ci.yml/badge.svg)](https://github.com/wiseops-team/mneme/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ansible Version](https://img.shields.io/badge/ansible-v2.16%20%2B-blue)](https://galaxy.ansible.com/ui/standalone/roles/wiseops_team/mneme/)
+[![Platforms](https://img.shields.io/badge/platforms-EL%208%20|%209-lightgrey)](https://galaxy.ansible.com/ui/standalone/roles/wiseops_team/mneme/)
 # **mneme** - MySQL Native Ephemeral Management Engine
 
 **Production-Grade Backup & Disaster Recovery as Code for MariaDB.**
 
-An enterprise-grade Ansible role designed to manage the full lifecycle of data protection. Unlike legacy roles that merely configure cron jobs, `mariabackup` treats restoration as a first-class citizen.
+An enterprise-grade Ansible role designed to manage the full lifecycle of data protection. Unlike legacy roles that merely configure cron jobs, `mneme` treats restoration as a first-class citizen.
 It includes a dedicated custom Ansible module (`mneme_restore`) that enables **Declarative Recovery**, allowing you to integrate disaster recovery drills directly into your CI/CD pipelines.
 
 ## Quick Start
@@ -235,7 +237,3 @@ Licensed under the MIT License.
 
 Maintained by:
     **Ivan Gumeniuk**
-
-### Contributors
-
-- Ivan Gumeniuk (WiseOps)

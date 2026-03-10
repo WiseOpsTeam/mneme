@@ -32,7 +32,7 @@
     description: "MariaDB {{ mneme_mariadb_version }} archive repository"
     baseurl: "{{ mneme_mariadb_repo_url_ol_7 }}"
     gpgkey: https://archive.mariadb.org/PublicKey
-    gpgcheck: yes
+    gpgcheck: true
   when:
     - mneme_install_repo
     - ansible_distribution == "OracleLinux"

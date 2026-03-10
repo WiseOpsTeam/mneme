@@ -10,7 +10,7 @@
   retries: 3
   delay: 5
   until: mneme_install_result is succeeded
-  failed_when: 
+  failed_when:
     - mneme_install_result is failed
     - not mneme_xtrabackup_compatibility
   ignore_errors: "{{ mneme_xtrabackup_compatibility }}"
@@ -41,8 +41,8 @@
   ansible.builtin.stat:
     path: "{{ mneme_bin_path }}"
   register: mneme_bin_stat
-  failed_when: 
+  failed_when:
     - not mneme_bin_stat.stat.exists
     - not mneme_xtrabackup_compatibility
   ignore_errors: "{{ mneme_xtrabackup_compatibility }}"
-  when: not mneme_xtrabackup_compatibility 
+  when: not mneme_xtrabackup_compatibility

@@ -31,4 +31,4 @@
     state: directory
     owner: "{{ mneme_backup_script_owner }}"
     group: "{{ mneme_backup_script_group }}"
-    mode: '0755' 
+    mode: '0755'
