@@ -2,6 +2,12 @@
 # Based on ansible-lint config
 extends: default
 
+ignore: |
+  venv/
+  .venv/
+  molecule/
+  .github/workflows/
+
 rules:
   braces:
     max-spaces-inside: 1
@@ -10,28 +16,32 @@ rules:
     max-spaces-inside: 1
     level: error
   colons:
-    max-spaces-after: -1
+    max-spaces-after: 1
     level: error
   commas:
-    max-spaces-after: -1
+    max-spaces-after: 1
     level: error
   comments:
     min-spaces-from-content: 1
   octal-values:
     forbid-implicit-octal: true
     forbid-explicit-octal: true
-  comments-indentation: disable
-  document-start: disable
+  comments-indentation: enable
+  document-start: enable
   empty-lines:
-    max: 3
+    max: 2
     level: error
   hyphens:
     level: error
-  indentation: disable
+  indentation: enable
   key-duplicates: enable
-  line-length: disable
-  new-line-at-end-of-file: disable
+  line-length:
+    max: 160
+    level: warning
+  new-line-at-end-of-file: enable
   new-lines:
     type: unix
-  trailing-spaces: disable
-  truthy: disable
+  trailing-spaces: enable
+  truthy:
+    level: error
+    allowed-values: ['true', 'false']

@@ -8,4 +8,4 @@
 - name: Display message if repository installation is skipped
   ansible.builtin.debug:
     msg: "Repository installation is skipped because mneme_install_repo = {{ mneme_install_repo }}. Make sure MariaDB repository is installed by other means."
-  when: not mneme_install_repo 
+  when: not mneme_install_repo
