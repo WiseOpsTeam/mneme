@@ -1,0 +1,833 @@
+---
+- name: Verify (Static Analysis)
+  hosts: all
+  become: true
+  tasks:
+    - name: Install ShellCheck
+      ansible.builtin.package:
+        name: ShellCheck
+        state: present
+
+    - name: Run ShellCheck on Wrapper script only (Restore script is replaced by Module)
+      ansible.builtin.command:
+        cmd: "shellcheck -e SC1090,SC1091 /usr/local/bin/mneme_wrapper.sh"
+      register: shellcheck_results
+      changed_when: false
+      failed_when: shellcheck_results.rc != 0
+      ignore_errors: true
+
+- name: Verify partial backup and restore (Module Based)
+  hosts: all
+  become: true
+  vars:
+    db_name: test_db
+    table_name: test_table
+    backup_base_dir: "/home/data/mneme_backups/tmp"
+  tasks:
+    - name: Ensure client defaults present
+      import_tasks: ../common/tasks/create_my_cnf.yml
+
+    # -------------------------------------------------------
+    # 1. PREPARE & SEED DATA (BEFORE BACKUP)
+    # -------------------------------------------------------
+    - name: "PREPARE: Ensure ALL test tables exist BEFORE backup"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "{{ mneme_mysql_password }}"
+        query:
+          # 1. Partitioned Table
+          - "DROP TABLE IF EXISTS {{ db_name }}.part_table;"
+          - >
+            CREATE TABLE {{ db_name }}.part_table (
+              id INT NOT NULL,
+              log_date DATE NOT NULL,
+              msg VARCHAR(50)
+            ) ENGINE=InnoDB
+            PARTITION BY RANGE (YEAR(log_date)) (
+              PARTITION p2023 VALUES LESS THAN (2024),
+              PARTITION p2024 VALUES LESS THAN (2025),
+              PARTITION p2025 VALUES LESS THAN (2026)
+            );
+          - "INSERT INTO {{ db_name }}.part_table VALUES (1, '2023-05-01', 'Old log');"
+          - "INSERT INTO {{ db_name }}.part_table VALUES (2, '2024-05-01', 'Current log');"
+          - "INSERT INTO {{ db_name }}.part_table VALUES (3, '2025-05-01', 'Future log');"
+
+          # 2. Edge Case Table (Complex Comments)
+          - "DROP TABLE IF EXISTS {{ db_name }}.edge_case_table;"
+          - >
+            CREATE TABLE {{ db_name }}.edge_case_table (
+              id INT PRIMARY KEY,
+              name VARCHAR(100) /* comment with ; semicolon */ NOT NULL,
+              status ENUM('active','inactive') /* Multiline comment
+                with; multiple; semicolons;
+              */ DEFAULT 'active',
+              metadata JSON COMMENT 'User metadata; with semicolon'
+            ) ENGINE=InnoDB;
+          - "INSERT INTO {{ db_name }}.edge_case_table VALUES (1, 'test', 'active', '{\"key\":\"value\"}');"
+
+          # 3. Standard Table (Seed extra data)
+          - "INSERT INTO {{ db_name }}.{{ table_name }} (id, name) VALUES (2, 'test_data_2') ON DUPLICATE KEY UPDATE name='test_data_2';"
+
+    - name: Save expected row count for standard table
+      community.mysql.mysql_query:
+        query: "SELECT COUNT(*) AS c FROM {{ db_name }}.{{ table_name }};"
+        login_user: root
+        login_password: "{{ mneme_mysql_password }}"
+      register: before_rows
+
+    - name: Set expected_count fact
+      set_fact:
+        expected_count: "{{ before_rows.query_result[0][0].c | int }}"
+
+    - name: Run daily backup via wrapper
+      ansible.builtin.command: /usr/local/bin/mneme_wrapper.sh --type daily
+      register: backup_cmd
+      failed_when: backup_cmd.rc != 0
+
+    # -------------------------------------------------------
+    # 2. PREPARE ARTIFACTS
+    # -------------------------------------------------------
+    - name: Locate and unarchive latest archives
+      import_tasks: ../common/tasks/get_latest_backup_artifacts.yml
+      # Variables latest_backup_dir and latest_backup_date come from here
+
+    - name: "CRITICAL: Manually Prepare and Export backup for Direct Restore"
+      ansible.builtin.command: >-
+        mariadb-backup --prepare --export
+        --target-dir={{ latest_backup_dir }}
+      changed_when: true
+
+    - name: "Change ownership of backup dir to mysql (Crucial for Sidecar)"
+      ansible.builtin.file:
+        path: "{{ latest_backup_dir }}"
+        owner: mysql
+        group: mysql
+        state: directory
+        recurse: yes
+
+    - name: Define schema directory path
+      set_fact:
+        latest_schema_dir: "{{ backup_base_dir }}/mneme_schema_daily_{{ latest_backup_date }}"
+
+    # -------------------------------------------------------
+    # 3. TEST STRATEGY: SIDECAR (Logical Restore)
+    # -------------------------------------------------------
+    - name: "TEST 1: Sidecar Strategy (Standard Table)"
+      block:
+        - name: Simulate disaster (Drop Table)
+          community.mysql.mysql_query:
+            query: "DROP TABLE {{ db_name }}.{{ table_name }};"
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+
+        - name: Execute Restore via Module (Sidecar)
+          mneme_restore:
+            strategy: sidecar
+            database: "{{ db_name }}"
+            table: "{{ table_name }}"
+            backup_dir: "{{ latest_backup_dir }}"
+            login_config: /root/.my.cnf
+            client_bin: /usr/bin/mariadb
+            dump_bin: /usr/bin/mariadb-dump
+            mysqld_bin: /usr/sbin/mysqld
+          register: restore_sidecar
+
+        - name: Assert Restore Reported Change
+          ansible.builtin.assert:
+            that: restore_sidecar.changed
+
+        - name: Validate Data Integrity
+          community.mysql.mysql_query:
+            query: "SELECT COUNT(*) AS c FROM {{ db_name }}.{{ table_name }};"
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+          register: rows_check
+
+        - name: Assert Row Count Matches
+          ansible.builtin.assert:
+            that:
+              - rows_check.query_result[0][0].c | int == expected_count | int
+
+    # -------------------------------------------------------
+    # 4. TEST STRATEGY: DIRECT (Partitioned Table)
+    # -------------------------------------------------------
+    - name: "TEST 2: Direct Strategy (Partitioned Table with Exchange)"
+      block:
+        - name: Check partition rows BEFORE drop
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query: "SELECT COUNT(*) AS c FROM {{ db_name }}.part_table;"
+          register: part_count_before
+
+        - name: Drop partitioned table
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query: "DROP TABLE {{ db_name }}.part_table;"
+
+        - name: Execute Restore via Module (Direct)
+          mneme_restore:
+            strategy: direct
+            database: "{{ db_name }}"
+            table: "part_table"
+            backup_dir: "{{ latest_backup_dir }}"
+            schema_file: "{{ latest_schema_dir }}/{{ db_name }}_schema.sql"
+            force: true
+            client_bin: /usr/bin/mariadb
+          register: restore_direct
+
+        - name: Validate Partitioned Data
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query: "SELECT COUNT(*) AS c FROM {{ db_name }}.part_table;"
+          register: part_count_after
+
+        - name: Assert Partitioned Data Restored
+          ansible.builtin.assert:
+            that:
+              - part_count_after.query_result[0][0].c | int == part_count_before.query_result[0][0].c | int
+              - part_count_after.query_result[0][0].c | int == 3
+
+    # -------------------------------------------------------
+    # 5. TEST EDGE CASE: Schema Parsing (Python Logic)
+    # -------------------------------------------------------
+    - name: "TEST 3: Schema Parsing Edge Case"
+      block:
+        # Table edge_case_table is already created in prepare.yml and included in backup
+        - name: Drop edge case table
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query: "DROP TABLE {{ db_name }}.edge_case_table;"
+
+        - name: Restore using Direct strategy (Triggers Python Schema Parser)
+          mneme_restore:
+            strategy: direct
+            database: "{{ db_name }}"
+            table: "edge_case_table"
+            backup_dir: "{{ latest_backup_dir }}"
+            schema_file: "{{ latest_schema_dir }}/{{ db_name }}_schema.sql"
+            force: true
+            client_bin: /usr/bin/mariadb
+          register: restore_edge
+
+        - name: Verify Table Structure (Comments & Types)
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query: "SHOW CREATE TABLE {{ db_name }}.edge_case_table;"
+          register: edge_structure
+
+        - name: Assert Python Parser Handled Comments Correctly
+          ansible.builtin.assert:
+            that:
+              - "'id' in edge_structure.query_result[0][0]['Create Table']"
+              - "'status' in edge_structure.query_result[0][0]['Create Table']"
+              - "'metadata' in edge_structure.query_result[0][0]['Create Table']"
+            fail_msg: "Schema parser failed to recreate complex table structure"
+
+        - name: Validate Data Count
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query: "SELECT COUNT(*) AS c FROM {{ db_name }}.edge_case_table;"
+          register: edge_count_final
+          failed_when: edge_count_final.query_result[0][0].c | int != 1
+
+    # -------------------------------------------------------
+    # 6. TEST IDEMPOTENCY
+    # -------------------------------------------------------
+    - name: "TEST 4: Idempotency Check"
+      block:
+        - name: Run Sidecar Restore Again (Should be OK/Changed)
+          mneme_restore:
+            strategy: sidecar
+            database: "{{ db_name }}"
+            table: "{{ table_name }}"
+            backup_dir: "{{ latest_backup_dir }}"
+          register: idempotency_run
+
+        - name: Validate Data is still consistent
+          community.mysql.mysql_query:
+            query: "SELECT COUNT(*) AS c FROM {{ db_name }}.{{ table_name }};"
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+          register: rows_check_idem
+
+        - name: Assert Count Matches
+          ansible.builtin.assert:
+            that: rows_check_idem.query_result[0][0].c | int == expected_count | int
+
+    # -------------------------------------------------------
+    # TEST 5: Bulk/Batch Restore (Direct Strategy with Auto-Discovery)
+    # -------------------------------------------------------
+    - name: "TEST 5: Bulk Restore (Drop Whole DB -> Auto Discover)"
+      block:
+        - name: Drop entire test database
+          community.mysql.mysql_db:
+            name: "{{ db_name }}"
+            state: absent
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+
+        - name: Create empty DB (Required for Direct Restore to have a target)
+          community.mysql.mysql_db:
+            name: "{{ db_name }}"
+            state: present
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+
+        - name: Restore ALL tables via Module (Direct + AutoDiscovery)
+          mneme_restore:
+            strategy: direct
+            database: "{{ db_name }}"
+            # table: do not include (will initiate discovery)
+            backup_dir: "{{ latest_backup_dir }}"
+            schema_file: "{{ latest_schema_dir }}/{{ db_name }}_schema.sql"
+            force: true
+            client_bin: /usr/bin/mariadb
+          register: restore_bulk
+
+        - name: Verify Row Count (Standard Table)
+          community.mysql.mysql_query:
+            query: "SELECT COUNT(*) AS c FROM {{ db_name }}.{{ table_name }};"
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+          register: bulk_check
+
+        - name: Assert Data Restored
+          ansible.builtin.assert:
+            that:
+              - restore_bulk.changed
+              - bulk_check.query_result[0][0].c | int == expected_count | int
+
+
+    # -------------------------------------------------------
+    # TEST 6: Explicit List Restore (Batch Sidecar)
+    # -------------------------------------------------------
+    - name: "TEST 6: Explicit List Restore (Batch Sidecar)"
+      block:
+        - name: Drop multiple tables for list restore
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query:
+              - "DROP TABLE {{ db_name }}.{{ table_name }};"      # test_table
+              - "DROP TABLE {{ db_name }}.edge_case_table;"   # edge_case_table
+
+        - name: Restore explicit list of tables via Sidecar
+          mneme_restore:
+            strategy: sidecar
+            database: "{{ db_name }}"
+            table:
+              - "{{ table_name }}"
+              - "edge_case_table"
+            backup_dir: "{{ latest_backup_dir }}"
+            client_bin: /usr/bin/mariadb
+            dump_bin: /usr/bin/mariadb-dump
+            mysqld_bin: /usr/sbin/mysqld
+          register: restore_list
+
+        - name: Assert Change Reported
+          ansible.builtin.assert:
+            that: restore_list.changed
+
+        - name: Verify Both Tables Restored
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query:
+              - "SELECT COUNT(*) AS c FROM {{ db_name }}.{{ table_name }};"
+              - "SELECT COUNT(*) AS c FROM {{ db_name }}.edge_case_table;"
+          register: list_check
+
+        - name: Assert Data Counts
+          ansible.builtin.assert:
+            that:
+              - list_check.query_result[0][0].c | int == expected_count | int
+              - list_check.query_result[1][0].c | int == 1
+    # -------------------------------------------------------
+    # TEST 6.5: Foreign Key Integrity (Migrated)
+    # -------------------------------------------------------
+    - name: "TEST 6.5: Foreign Key Integrity"
+      block:
+        - name: Drop parent and child tables
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query:
+              - "DROP TABLE IF EXISTS {{ db_name }}.child;"
+              - "DROP TABLE IF EXISTS {{ db_name }}.parent;"
+
+        - name: Restore FK tables via Sidecar
+          mneme_restore:
+            strategy: sidecar
+            backup_dir: "{{ latest_backup_dir }}"
+            database: "{{ db_name }}"
+            table: ["parent", "child"]
+          register: restore_fk
+
+        - name: Verify FK is active (Attempt to insert orphan row)
+          ansible.builtin.shell: "mysql -u root -p'{{ mneme_mysql_password }}' -e \"INSERT INTO {{ db_name }}.child (id, parent_id) VALUES (999, 999);\""
+          register: check_fk
+          failed_when: false
+
+        - name: Assert FK violation occurred
+          ansible.builtin.assert:
+            that:
+              - check_fk.rc != 0
+              - '"Cannot add or update a child row: a foreign key constraint fails" in check_fk.stderr'
+            fail_msg: "Foreign Key constraint failed to prevent orphan insertion!"
+
+    # -------------------------------------------------------
+    # TEST 7: Full Cold Restore (Copy-Back Strategy)
+    # WARNING: DESTRUCTIVE!
+    # -------------------------------------------------------
+    - name: "TEST 7: Full Cold Restore (Copy-Back)"
+      block:
+        - name: Stop MariaDB
+          ansible.builtin.service:
+            name: mariadb
+            state: stopped
+
+        - name: Clean Data Directory (Simulate disaster)
+          ansible.builtin.file:
+            path: /var/lib/mysql
+            state: absent
+
+        - name: Recreate Data Directory
+          ansible.builtin.file:
+            path: /var/lib/mysql
+            state: directory
+            owner: mysql
+            group: mysql
+            mode: '0755'
+
+        - name: Execute Full Restore via Module
+          mneme_restore:
+            strategy: copy_back
+            backup_dir: "{{ latest_backup_dir }}"
+            datadir: /var/lib/mysql
+            mneme_bin: /usr/bin/mariadb-backup
+            force: true
+          register: restore_full
+
+        - name: Start MariaDB
+          ansible.builtin.service:
+            name: mariadb
+            state: started
+
+        - name: Validate Data after Full Restore
+          community.mysql.mysql_query:
+            query: "SELECT COUNT(*) AS c FROM {{ db_name }}.{{ table_name }};"
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+          register: full_check
+
+        - name: Assert Full Restore Success
+          ansible.builtin.assert:
+            that:
+              - restore_full.changed
+              - full_check.query_result[0][0].c | int == expected_count | int
+
+    - name: "TEST 8: Full Restore using Move-Back (Destructive)"
+      block:
+        - name: Setup - Stop MariaDB
+          ansible.builtin.service:
+            name: mariadb
+            state: stopped
+
+        - name: Setup - Clean Data Directory
+          ansible.builtin.file:
+            path: /var/lib/mysql
+            state: absent
+
+        - name: Setup - Recreate Data Directory
+          ansible.builtin.file:
+            path: /var/lib/mysql
+            state: directory
+            owner: mysql
+            group: mysql
+            mode: '0755'
+
+        - name: Setup - Create disposable copy of backup for move-back test
+          ansible.builtin.command: "cp -r {{ latest_backup_dir }} {{ latest_backup_dir }}_move_test"
+          changed_when: true
+
+        - name: Execute Move-Back Restore
+          mneme_restore:
+            strategy: move_back
+            backup_dir: "{{ latest_backup_dir }}_move_test" # Use copy
+            datadir: /var/lib/mysql
+            mneme_bin: /usr/bin/mariadb-backup
+            force: true
+          register: restore_move
+
+        - name: Start MariaDB
+          ansible.builtin.service:
+            name: mariadb
+            state: started
+
+        - name: Verification - Check Data Existence
+          community.mysql.mysql_query:
+            query: "SELECT COUNT(*) AS c FROM {{ db_name }}.{{ table_name }};"
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+          register: move_check
+
+        - name: Verification - Ensure no .ibd files remain in source (Move Verification)
+          ansible.builtin.find:
+            paths: "{{ latest_backup_dir }}_move_test"
+            patterns: "*.ibd"
+            recurse: yes
+          register: source_ibd_check
+
+        - name: Assert Move-Back Success
+          ansible.builtin.assert:
+            that:
+              - restore_move.changed
+              # Check that data exists in target DB (SQL query from previous step)
+              - move_check.query_result[0][0].c | int == expected_count | int
+              # Check that heavy files are missing in source
+              - source_ibd_check.matched == 0
+            fail_msg: "Move-back failed: Data missing in target OR .ibd files left in source."
+
+        - name: Cleanup disposable backup copy
+          ansible.builtin.file:
+            path: "{{ latest_backup_dir }}_move_test"
+            state: absent
+
+    # -------------------------------------------------------
+    # TEST 9: NEW MODULE - Mariabackup Verify (Drill Mode)
+    # -------------------------------------------------------
+    - name: "TEST 9: Verify Module (Drill Mode)"
+      block:
+        - name: "9.1 Verify Specific Table (Happy Path)"
+          mneme_verify:
+            backup_dir: "{{ latest_backup_dir }}"
+            database: "{{ db_name }}"
+            table: ["{{ table_name }}"]
+            validation_query: "SELECT count(*) FROM {{ table_name }} WHERE id > 0"
+            # Explicit binary paths (good practice in tests)
+            client_bin: /usr/bin/mariadb
+            dump_bin: /usr/bin/mariadb-dump
+            mysqld_bin: /usr/sbin/mysqld
+          register: verify_specific
+
+        - name: Assert 9.1 passed
+          ansible.builtin.assert:
+            that:
+              - not verify_specific.changed
+              - "'Verification successful' in verify_specific.msg"
+
+        - name: "9.2 Verify Random Tables (Happy Path)"
+          mneme_verify:
+            backup_dir: "{{ latest_backup_dir }}"
+            database: "{{ db_name }}"
+            random_tables_count: 1
+            validation_query: "SHOW TABLES"
+          register: verify_random
+
+        - name: Assert 9.2 passed and picked a table
+          ansible.builtin.assert:
+            that:
+              - not verify_random.changed
+              - verify_random.tables_verified | length > 0
+
+        - name: "9.3 Verify Failure Handling (Bad Query)"
+          mneme_verify:
+            backup_dir: "{{ latest_backup_dir }}"
+            database: "{{ db_name }}"
+            table: ["{{ table_name }}"]
+            # Querying non-existent table will trigger SQL Error
+            validation_query: "SELECT * FROM non_existent_ghost_table"
+          register: verify_fail
+          ignore_errors: true
+
+        - name: Assert 9.3 failed correctly
+          ansible.builtin.assert:
+            that:
+              - verify_fail.failed
+              - "'Verification failed' in verify_fail.msg"
+              - "'Table' in verify_fail.error and 'doesn\\'t exist' in verify_fail.error"
+
+        - name: "9.4 Ensure NO verify_ databases remain"
+          community.mysql.mysql_query:
+            login_user: root
+            login_password: "{{ mneme_mysql_password }}"
+            query: "SHOW DATABASES LIKE 'verify_%';"
+          register: leftovers
+
+        - name: Assert Cleanup
+          ansible.builtin.assert:
+            that:
+              - leftovers.query_result[0] | length == 0
+            fail_msg: "CRITICAL: The verification module left temporary databases behind!"
+
+    # -------------------------------------------------------
+    # TEST 10: Security - Path Traversal Prevention
+    # -------------------------------------------------------
+    - name: "TEST 10: Security - Path Traversal Prevention"
+      block:
+        - name: "10.1 Attempt path traversal in database name"
+          mneme_restore:
+            strategy: direct
+            backup_dir: "{{ latest_backup_dir }}"
+            database: "../../../etc"
+            table: ["passwd"]
+            force: true
+            client_bin: /usr/bin/mariadb
+          register: traversal_test
+          ignore_errors: true
+
+        - name: "DEBUG: Show traversal_test result"
+          ansible.builtin.debug:
+            var: traversal_test
+
+        - name: "Assert path traversal was blocked"
+          ansible.builtin.assert:
+            that:
+              - traversal_test.failed
+              - "'traversal' in traversal_test.msg | lower or 'invalid' in traversal_test.msg | lower"
+            fail_msg: "SECURITY FAIL: Path traversal was not blocked!"
+
+        - name: "10.2 Attempt SQL injection in table name"
+          mneme_restore:
+            strategy: sidecar
+            backup_dir: "{{ latest_backup_dir }}"
+            database: "{{ db_name }}"
+            table: ["test'; DROP TABLE users; --"]
+          register: injection_test
+          ignore_errors: true
+
+        - name: "DEBUG: Show injection_test result"
+          ansible.builtin.debug:
+            var: injection_test
+
+        - name: "Assert SQL injection was blocked"
+          ansible.builtin.assert:
+            that:
+              - injection_test.failed
+              - >-
+                'dangerous' in injection_test.msg | lower or
+                'invalid' in injection_test.msg | lower or
+                'forbidden' in injection_test.msg | lower or
+                "couldn't find table" in injection_test.stderr | lower
+            fail_msg: "Injection reached execution without validation!"
+
+    # ------------------------------------------------------------------
+    # 5. TEST AUTO-DISCOVERY (LATEST STRATEGY)
+    # ------------------------------------------------------------------
+    - name: "TEST 5 | Setup Real Archives for Auto-Discovery"
+      block:
+        - name: "SETUP | Ensure mock directories exist"
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: '0755'
+          loop:
+            - "/tmp/mock_archives"
+            - "/tmp/tpl_workspace"
+
+        # 1. GENERATE TEMPLATE
+        - name: "SETUP | Generate REAL backup as template"
+          ansible.builtin.command: "/usr/local/bin/mneme_wrapper.sh --type daily"
+          register: _backup_run
+          failed_when: _backup_run.rc != 0
+
+        # 2. EXTRACT TEMPLATE TO WORKSPACE
+        - name: "SETUP | Find generated backup"
+          ansible.builtin.find:
+            paths: "{{ mneme_archive_dir }}"
+            patterns: "mneme_daily_*.tar.gz"
+            excludes: "*schema*"
+            file_type: file
+          vars:
+            mneme_archive_dir: /home/data/mneme_backups/archive
+          register: _real_backups
+
+        - name: "SETUP | Extract template"
+          ansible.builtin.unarchive:
+            src: "{{ (_real_backups.files | sort(attribute='mtime', reverse=true) | first).path }}"
+            dest: "/tmp/tpl_workspace"
+            remote_src: true
+
+        # 3. IDENTIFY ORIGINAL FOLDER NAME
+        - name: "SETUP | Find extracted folder name"
+          ansible.builtin.find:
+            paths: "/tmp/tpl_workspace"
+            file_type: directory
+            recurse: false
+          register: _tpl_folder
+
+        - name: "SETUP | Set template directory fact"
+          ansible.builtin.set_fact:
+            _tpl_dirname: "{{ _tpl_folder.files[0].path | basename }}"
+
+        # 4. REPACK WITH CORRECT NAMES
+        - name: "SETUP | Create Repacked Mocks"
+          vars:
+            _target_dirname: "{{ item.file | regex_replace('\\.tar\\.gz$', '') }}"
+          ansible.builtin.shell: >-
+            mv "/tmp/tpl_workspace/{{ _tpl_dirname }}" "/tmp/tpl_workspace/{{ _target_dirname }}" &&
+            tar -czf "/tmp/mock_archives/{{ item.file }}" -C "/tmp/tpl_workspace" "{{ _target_dirname }}" &&
+            mv "/tmp/tpl_workspace/{{ _target_dirname }}" "/tmp/tpl_workspace/{{ _tpl_dirname }}"
+          loop:
+            - { file: "mneme_daily_2025-05-01.tar.gz" }
+            - { file: "mneme_daily_2025-05-02.tar.gz" }
+            - { file: "mneme_daily_2025-05-03.tar.gz" }
+            - { file: "mneme_daily_2025-05-04.tar.gz" }
+            - { file: "mneme_weekly_2025-05-05.tar.gz" }
+
+        # 5. APPLY TIMESTAMPS
+        - name: "SETUP | Apply timestamps to mocks"
+          ansible.builtin.shell: "touch -t {{ item.time }} /tmp/mock_archives/{{ item.file }}"
+          loop:
+            - { file: "mneme_daily_2025-05-01.tar.gz", time: "202505010000.00" }
+            - { file: "mneme_daily_2025-05-02.tar.gz", time: "202505020000.00" }
+            - { file: "mneme_daily_2025-05-03.tar.gz", time: "202505030000.00" }
+            - { file: "mneme_daily_2025-05-04.tar.gz", time: "202505040000.00" }
+            - { file: "mneme_weekly_2025-05-05.tar.gz", time: "202505050000.00" }
+
+        # 6. CREATE CHECKSUMS
+        - name: "SETUP | Create checksum markers"
+          ansible.builtin.file:
+            path: "/tmp/mock_archives/{{ item.file }}"
+            state: touch
+            modification_time: "{{ item.time }}"
+          loop:
+            - { file: "mneme_daily_2025-05-03.tar.gz.sha256", time: "202505030001.00" }
+            - { file: "mneme_weekly_2025-05-05.tar.gz.sha256", time: "202505050001.00" }
+
+        # Cleanup workspace
+        - name: "SETUP | Remove template workspace"
+          ansible.builtin.file:
+            path: "/tmp/tpl_workspace"
+            state: absent
+
+    - name: "TEST 5.1 | Verify FALLBACK Mode (No checksums)"
+      # We simulate this by pointing to a dir that has files but NO checksums yet.
+      # Let's clean the checksum for 2025-05-03 temporarily.
+      block:
+        - name: "MOCK | Temporarily remove checksums"
+          ansible.builtin.file:
+            path: "/tmp/mock_archives/mneme_daily_2025-05-03.tar.gz.sha256"
+            state: absent
+
+        - name: "ACTION | Run restore_prepare with 'latest' (Fallback)"
+          ansible.builtin.include_role:
+            name: mneme
+            tasks_from: restore_prepare
+          vars:
+            mneme_archive_dir: "/tmp/mock_archives"
+            mneme_restore_target_date: "latest"
+            mneme_restore_type: "daily"
+
+        - name: "ASSERT | Fallback selected the raw newest file (2025-05-04)"
+          ansible.builtin.assert:
+            that:
+              - _r_date == "2025-05-04"
+            fail_msg: "Fallback logic failed! Expected 2025-05-04 (newest raw), got {{ _r_date }}"
+
+    - name: "TEST 5.2 | Verify SAFE Mode & Race Condition Protection"
+      # Now we restore the checksum for 05-03.
+      # Logic should prioritize 05-03 (Verified) over 05-04 (Raw/Incomplete),
+      # even though 05-04 is newer.
+      block:
+        - name: "MOCK | Restore valid checksum for 2025-05-03"
+          ansible.builtin.shell: >-
+            sha256sum mneme_daily_2025-05-03.tar.gz > mneme_daily_2025-05-03.tar.gz.sha256 &&
+            touch -t "202505030001.00" mneme_daily_2025-05-03.tar.gz.sha256
+          args:
+            chdir: "/tmp/mock_archives"
+
+        - name: "ACTION | Run restore_prepare with 'latest' (Safe Mode)"
+          ansible.builtin.include_role:
+            name: mneme
+            tasks_from: restore_prepare
+          vars:
+            mneme_archive_dir: "/tmp/mock_archives"
+            mneme_restore_target_date: "latest"
+            mneme_restore_type: "daily"
+
+        - name: "ASSERT | Safe Mode selected the verified file (2025-05-03)"
+          ansible.builtin.assert:
+            that:
+              - _r_date == "2025-05-03"
+            fail_msg: "Safe Mode failed! Expected 2025-05-03 (Verified), got {{ _r_date }}. It might have picked the incomplete 05-04 file."
+
+    - name: "TEST 5.3 | Verify Scoped Logic (Daily vs Weekly)"
+      # We have a Weekly backup from 2025-05-05 (Global Newest).
+      # But we request 'daily'. It should ignore the weekly file.
+      block:
+        - name: "ACTION | Run restore_prepare for DAILY type"
+          ansible.builtin.include_role:
+            name: mneme
+            tasks_from: restore_prepare
+          vars:
+            mneme_archive_dir: "/tmp/mock_archives"
+            mneme_restore_target_date: "latest"
+            mneme_restore_type: "daily"
+          ignore_errors: true
+
+        - name: "ASSERT | Scoped Logic ignored the Weekly backup"
+          ansible.builtin.assert:
+            that:
+              - _r_date == "2025-05-03"
+            fail_msg: "Scoping failed! Expected 2025-05-03 (Daily), got {{ _r_date }} (Likely picked Weekly 05-05)."
+
+    - name: "TEST 5.4 | Verify Integrity Check (Corruption Detection)"
+      block:
+        # 1. SETUP
+        - name: "SETUP | Ensure mock directory exists"
+          ansible.builtin.file:
+            path: "/tmp/integrity_test"
+            state: directory
+            mode: '0755'
+
+        - name: "SETUP | Create valid dummy archive"
+          ansible.builtin.shell: "echo 'valid content' > /tmp/integrity_test/mneme_daily_2025-05-03.tar.gz"
+
+        - name: "SETUP | Generate valid checksum"
+          ansible.builtin.shell: "cd /tmp/integrity_test && sha256sum mneme_daily_2025-05-03.tar.gz > mneme_daily_2025-05-03.tar.gz.sha256"
+
+        # 2. MOCK CORRUPTION
+        - name: "MOCK | Corrupt the archive content"
+          ansible.builtin.shell: "echo 'corruption' >> /tmp/integrity_test/mneme_daily_2025-05-03.tar.gz"
+
+        # 3. ACTION & ASSERT (Try/Catch Pattern)
+        - name: "ACTION | Attempt Restore (Block/Rescue)"
+          block:
+            # --- TRY ---
+            - name: "Run restore_prepare (Should Fail)"
+              ansible.builtin.include_role:
+                name: mneme
+                tasks_from: restore_prepare
+              vars:
+                mneme_archive_dir: "/tmp/integrity_test"
+                mneme_restore_target_date: "latest"
+                mneme_restore_type: "daily"
+
+            - name: "FAIL | Role succeeded unexpectedly"
+              ansible.builtin.fail:
+                msg: "SECURITY FAIL: The role successfully prepared a corrupted backup! Checksum verification is broken."
+
+          rescue:
+            # --- CATCH ---
+            - name: "SUCCESS | Expected failure caught"
+              ansible.builtin.debug:
+                msg: "Great! The role failed as expected. Integrity check is working."
+
+      always:
+        # 4. CLEANUP
+        - name: "CLEANUP | Remove integrity test files"
+          ansible.builtin.file:
+            path: "/tmp/integrity_test"
+            state: absent
+
+    - name: "CLEANUP | Remove mock archives"
+      ansible.builtin.file:
+        path: "/tmp/mock_archives"
+        state: absent

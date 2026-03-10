@@ -1,0 +1,3 @@
+---
+# Reuse the default scenario bootstrap to install MariaDB and seed data
+- import_playbook: ../default/prepare.yml

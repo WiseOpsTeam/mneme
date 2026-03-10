@@ -1,0 +1,9 @@
+---
+# Ensure MySQL client defaults file exists for root user
+- name: Create .my.cnf for root
+  ansible.builtin.template:
+    src: ../default/my.cnf.j2
+    dest: /root/.my.cnf
+    owner: root
+    group: root
+    mode: '0600'

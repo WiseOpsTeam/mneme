@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+env:
+  ANSIBLE_ROLES_PATH: ${{ github.workspace }}/..
+  ANSIBLE_FORCE_COLOR: '1'
+
+jobs:
+  lint_and_test:
+    name: Lint & Molecule Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rsync build-essential
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Ansible Collections
+        run: ansible-galaxy collection install community.general community.mysql
+
+      - name: Run Linters (Fail-Fast)
+        run: |
+          yamllint .
+          ansible-lint .
+
+      - name: Run molecule test (default)
+        run: molecule test -s default
+
+      - name: Run molecule test (restore_integration)
+        run: molecule test -s restore_integration
+
+      - name: Run molecule test (partial_backup_test)
+        run: molecule test -s partial_backup_test

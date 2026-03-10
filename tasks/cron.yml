@@ -1,0 +1,33 @@
+---
+# Handle cron job setup
+
+- name: Create crontab MAILTO variable
+  community.general.cronvar:
+    name: MAILTO
+    value: "{{ mneme_mailto_address }}"
+  when: mneme_backup_cron
+
+- name: Schedule or remove mariabackup cron jobs for each retention contour
+  ansible.builtin.cron:
+    name: "MariaBackup {{ item.type | capitalize }} Backup"
+    minute: "{{ item.schedule.split(' ')[0] }}"
+    hour: "{{ item.schedule.split(' ')[1] }}"
+    day: "{{ item.schedule.split(' ')[2] }}"
+    month: "{{ item.schedule.split(' ')[3] }}"
+    weekday: "{{ item.schedule.split(' ')[4] }}"
+    job: >-
+      {%- set base_command = "/usr/local/bin/mneme_wrapper.sh --type " ~ item.type -%}
+      {%- if mneme_use_cgroups | default(false) -%}
+        {%- set runner = "systemd-run --scope -p MemoryHigh=" ~ mneme_ram_soft_limit ~ " -p MemoryMax=" ~ mneme_ram_hard_limit -%}
+        {%- set job_command = runner ~ " " ~ base_command -%}
+      {%- else -%}
+        {%- set job_command = base_command -%}
+      {%- endif -%}
+      {%- if mneme_block_on_master | default(false) -%}
+      ( [ "$({{ mneme_mariadb_bin_path }} --defaults-file=/root/.my.cnf -NBe "SELECT @@GLOBAL.read_only;" 2>/dev/null)" = "1" ] ) && {{ job_command }}
+      {%- else -%}
+      {{- job_command -}}
+      {%- endif %}
+    user: "{{ mneme_backup_script_owner }}"
+    state: "{{ 'present' if item.active and mneme_backup_cron else 'absent' }}"
+  loop: "{{ mneme_retention_contours }}"

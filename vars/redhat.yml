@@ -1,0 +1,7 @@
+---
+# Red Hat specific variables
+
+# Default repository URLs
+mneme_mariadb_repo_url_rhel_9: "http://yum.mariadb.org/{{ mneme_mariadb_version }}/rhel{{ ansible_distribution_major_version }}-amd64"
+mneme_epel_repo_url: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm"
+mneme_epel_repo_key_url: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-{{ ansible_distribution_major_version }}" 

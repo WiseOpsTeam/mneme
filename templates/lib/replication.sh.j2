@@ -1,0 +1,14 @@
+#!/bin/bash
+# Replication management functions for mariabackup
+
+{% if mneme_safe_slave_autorestore_replication %}
+# Function to restore replication if stopped
+start_replication() {
+    log "Attempting to restore replication using query: {{ mneme_safe_slave_autorestore_replication_query }}"
+    if {{ mneme_mariadb_bin_path }} -e "{{ mneme_safe_slave_autorestore_replication_query }}"; then
+         log "Replication restored successfully."
+    else
+         log "ERROR: Failed to restore replication. Please check replication status manually."
+    fi
+}
+{% endif %} 

@@ -1,0 +1,74 @@
+#!/bin/bash
+# Prometheus metrics management functions for mariabackup
+
+{% if mneme_prometheus_enabled %}
+update_prometheus_metrics() {
+    local status="$1"        # 1 = success, 0 = failure
+    local contour="$2"       # daily, weekly, monthly
+    local duration="$3"      # seconds
+    local size="$4"          # bytes
+
+    local prom_dir="{{ mneme_prometheus_dir }}"
+    # Use distinct filenames per contour to avoid overwriting weekly metrics with daily ones
+    local prom_file="${prom_dir}/mneme_${contour}.prom"
+    local tmp_file="${prom_file}.tmp"
+    local timestamp
+    timestamp=$(date +%s)
+    local hostname="{{ inventory_hostname }}"
+
+    # Ensure directory exists
+    if [ ! -d "$prom_dir" ]; then
+        mkdir -p "$prom_dir"
+        chmod 755 "$prom_dir"
+    fi
+
+    # --- STATE PRESERVATION LOGIC ---
+    # We need to persist the last SUCCESS timestamp even if this run fails.
+    # Try to extract the previous success timestamp from the existing file.
+    local last_success_val="0"
+
+    if [ -f "$prom_file" ]; then
+        # Grep the specific metric line and extract the value (last field)
+        local extracted
+        extracted=$(grep "^mneme_last_success_timestamp_seconds" "$prom_file" | awk '{print $NF}')
+
+        # Validate that it is an integer
+        if [[ "$extracted" =~ ^[0-9]+$ ]]; then
+            last_success_val="$extracted"
+        fi
+    fi
+
+    # Logic: Update success timestamp ONLY if status is 1
+    if [ "$status" -eq 1 ]; then
+        last_success_val="$timestamp"
+    fi
+    # --------------------------------
+
+    # Atomic write to temporary file
+    cat <<EOF > "$tmp_file"
+# HELP mneme_last_run_timestamp_seconds Timestamp of the last backup run completion (any status).
+# TYPE mneme_last_run_timestamp_seconds gauge
+mneme_last_run_timestamp_seconds{type="${contour}", db_host="${hostname}"} ${timestamp}
+
+# HELP mneme_last_success_timestamp_seconds Timestamp of the last SUCCESSFUL backup run.
+# TYPE mneme_last_success_timestamp_seconds gauge
+mneme_last_success_timestamp_seconds{type="${contour}", db_host="${hostname}"} ${last_success_val}
+
+# HELP mneme_last_status Status of the last backup run (1 = success, 0 = failure).
+# TYPE mneme_last_status gauge
+mneme_last_status{type="${contour}", db_host="${hostname}"} ${status}
+
+# HELP mneme_duration_seconds Duration of the backup process in seconds.
+# TYPE mneme_duration_seconds gauge
+mneme_duration_seconds{type="${contour}", db_host="${hostname}"} ${duration}
+
+# HELP mneme_size_bytes Compressed size of the backup archive in bytes.
+# TYPE mneme_size_bytes gauge
+mneme_size_bytes{type="${contour}", db_host="${hostname}"} ${size}
+EOF
+
+    # Atomic move
+    mv -f "$tmp_file" "$prom_file"
+    chmod 644 "$prom_file"
+}
+{% endif %}

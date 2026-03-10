@@ -1,0 +1,41 @@
+---
+# Reuse the default scenario bootstrap to install MariaDB and seed data
+- import_playbook: ../default/prepare.yml
+
+- name: Prepare | Seed Partitioned Data
+  hosts: all
+  become: true
+  vars:
+    db_name: "test_db"
+  tasks:
+    - name: Create a partitioned table
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "{{ mneme_mysql_password }}"
+        query:
+          - >
+            CREATE TABLE IF NOT EXISTS {{ db_name }}.part_table (
+              id INT NOT NULL,
+              log_date DATE NOT NULL,
+              msg VARCHAR(50)
+            ) ENGINE=InnoDB
+            PARTITION BY RANGE (YEAR(log_date)) (
+              PARTITION p2023 VALUES LESS THAN (2024),
+              PARTITION p2024 VALUES LESS THAN (2025),
+              PARTITION p2025 VALUES LESS THAN (2026)
+            );
+          - "INSERT INTO {{ db_name }}.part_table VALUES (1, '2023-05-01', 'Old log');"
+          - "INSERT INTO {{ db_name }}.part_table VALUES (2, '2024-05-01', 'Current log');"
+          - "INSERT INTO {{ db_name }}.part_table VALUES (3, '2025-05-01', 'Future log');"
+          - >
+            CREATE TABLE IF NOT EXISTS {{ db_name }}.parent (
+              id INT PRIMARY KEY
+            ) ENGINE=InnoDB;
+          - >
+            CREATE TABLE IF NOT EXISTS {{ db_name }}.child (
+              id INT PRIMARY KEY,
+              parent_id INT,
+              FOREIGN KEY (parent_id) REFERENCES parent(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB;
+          - "INSERT INTO {{ db_name }}.parent (id) VALUES (100);"
+          - "INSERT INTO {{ db_name }}.child (id, parent_id) VALUES (101, 100);"

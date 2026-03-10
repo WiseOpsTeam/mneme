@@ -1,0 +1,11 @@
+#!/bin/bash
+# Monitoring notification functions for mariabackup
+
+{% if mneme_monitoring_notify_enable %}
+# Function to notify monitoring systems
+backup_notify() {
+  local port=$1
+  local message=$2
+  /usr/bin/echo -n "${message}" | /usr/bin/nc -w 1 -u {{ mneme_monitoring_notify_ip }} "${port}"
+}
+{% endif %} 

@@ -1,0 +1,22 @@
+stages:
+  - test
+
+molecule_test:
+  stage: test
+  image: python:3.12-slim
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    ANSIBLE_ROLES_PATH: "$CI_PROJECT_DIR/.."
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git build-essential rsync curl tar
+    - curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-26.1.4.tgz" -o docker.tgz
+    - tar -xzf docker.tgz docker/docker
+    - mv docker/docker /usr/local/bin/docker
+    - rm -rf docker docker.tgz
+    - pip install "ansible==9.11.0" molecule molecule-plugins[docker]
+    - ansible-galaxy collection install community.general community.mysql
+    - ln -s /builds/hasd.me/ansible-roles/mariabackup /builds/hasd.me/ansible-roles/mneme
+  script:
+    - molecule test -s default
+    - molecule test -s restore_integration
+    - molecule test -s partial_backup_test

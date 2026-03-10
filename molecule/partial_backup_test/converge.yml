@@ -1,0 +1,14 @@
+---
+- name: Converge (partial backup scenario)
+  hosts: all
+  become: true
+  vars:
+    # Ensure schemas are archived so the restore can replay them
+    mneme_databases_schemes_include:
+      - "test_db"
+    # (Optional) speed-up restore if wrapper prepares the backup
+    mneme_prepare_backup: true
+  roles:
+    - role: "mneme"
+  tags:
+    - mneme_setup

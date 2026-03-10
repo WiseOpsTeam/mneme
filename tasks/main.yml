@@ -1,0 +1,45 @@
+---
+
+- name: Include variables specific to OS release
+  include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_distribution | lower }}-{{ ansible_distribution_major_version }}.yml"
+    - "{{ ansible_distribution | lower }}.yml"
+    - "{{ ansible_os_family | lower }}.yml"
+    - "default.yml"
+  tags: always
+
+- name: Verify that mandatory variables are set
+  ansible.builtin.assert:
+    that:
+      - mneme_mysql_password is defined
+      - mneme_mysql_password != ""
+    fail_msg: >-
+      variable 'mneme_mysql_password' is not set. Define it in your inventory, e.g. in group_vars/all/vault.yml.
+      Ensure that it is encrypted via Ansible Vault, Hashicorp Vault or similar instruments.
+    quiet: true
+  tags: [always, mneme_config_check]
+
+- name: Add repositories
+  import_tasks: repos.yml
+  tags: [mneme_repos, mneme_install]
+
+- name: Install packages
+  import_tasks: install.yml
+  tags: [mneme_install]
+
+- name: Setup directories
+  import_tasks: directories.yml
+  tags: [mneme_setup]
+
+- name: Deploy configuration
+  import_tasks: config.yml
+  tags: [mneme_config]
+
+- name: Deploy scripts
+  import_tasks: scripts.yml
+  tags: [mneme_scripts]
+
+- name: Configure cron jobs
+  import_tasks: cron.yml
+  tags: [mneme_cron]

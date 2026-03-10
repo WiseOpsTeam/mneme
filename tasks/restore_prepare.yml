@@ -1,0 +1,252 @@
+---
+# tasks/restore_prepare.yml
+# Description: Smart helper to unarchive and prepare backup artifacts.
+# Features: Idempotency, Pigz detection, Permission fix after prepare.
+
+# =============================================================================
+# 0. Initialization (Pre-Calculation)
+# =============================================================================
+- name: "RESTORE_PREPARE | Initialize effective date"
+  ansible.builtin.set_fact:
+    # We use an internal variable '_r_date' to allow overwriting inside the role
+    # (bypassing Ansible's role param precedence issues)
+    _r_date: "{{ mneme_restore_target_date }}"
+    _r_type: "{{ mneme_restore_type | default('daily') }}"
+
+# =============================================================================
+# 1. Auto-Discovery (Cascade: Checksum -> Raw File)
+# =============================================================================
+- name: "RESTORE_PREPARE | Auto-discover latest backup (Scoped Cascade)"
+  block:
+    # ---------------------------------------------------------
+    # STEP 1: Attempt to find safe checksum markers (.sha256)
+    # ---------------------------------------------------------
+    - name: "AUTO-DISCOVERY | Attempt 1: Find safe checksum markers"
+      ansible.builtin.find:
+        paths: "{{ mneme_archive_dir }}"
+        # Search only for the selected type to ensure Scoped safety
+        patterns: "mneme_{{ _r_type }}_*.tar.gz.sha256"
+        file_type: file
+      register: _found_markers
+
+    # ---------------------------------------------------------
+    # STEP 2: Fallback to raw archives if markers are missing
+    # ---------------------------------------------------------
+    - name: "AUTO-DISCOVERY | Attempt 2: Find raw archives (Fallback)"
+      ansible.builtin.find:
+        paths: "{{ mneme_archive_dir }}"
+        patterns: "mneme_{{ _r_type }}_*.tar.gz"
+        file_type: file
+      register: _found_archives
+      # Run only if no markers were found
+      when: _found_markers.matched == 0
+
+    # ---------------------------------------------------------
+    # STEP 3: Analyze results and select winner
+    # ---------------------------------------------------------
+    - name: "AUTO-DISCOVERY | Select source file"
+      ansible.builtin.set_fact:
+        # If markers found -> pick the latest marker. Else -> pick the latest archive.
+        _latest_obj: >-
+          {{
+            (_found_markers.files | sort(attribute='mtime', reverse=true) | first)
+            if (_found_markers.matched > 0)
+            else
+            (_found_archives.files | sort(attribute='mtime', reverse=true) | first)
+          }}
+        _is_safe_mode: "{{ _found_markers.matched > 0 }}"
+
+    - name: "AUTO-DISCOVERY | Assert anything found"
+      ansible.builtin.assert:
+        that:
+          - (_found_markers.matched > 0) or (_found_archives.matched > 0)
+        fail_msg: >-
+          Critical: Could not find ANY backups (neither .sha256 markers nor .tar.gz archives)
+          for type '{{ _r_type }}' in {{ mneme_archive_dir }}.
+
+    # ---------------------------------------------------------
+    # STEP 4: Update Effective Date (_r_date)
+    # ---------------------------------------------------------
+    - name: "AUTO-DISCOVERY | Resolve target date"
+      ansible.builtin.set_fact:
+        # We overwrite _r_date, NOT the input variable mneme_restore_target_date
+        _r_date: "{{ _latest_obj.path | regex_search('(\\d{4}-\\d{2}-\\d{2})', '\\1') | first }}"
+
+    # ---------------------------------------------------------
+    # STEP 5: Announce Selection
+    # ---------------------------------------------------------
+    - name: "AUTO-DISCOVERY | Announce selection (SAFE)"
+      ansible.builtin.debug:
+        msg: "SAFE DISCOVERY: Found verified checksum. Selected: {{ _r_date }}"
+      when: _is_safe_mode
+
+    - name: "AUTO-DISCOVERY | Announce selection (UNSAFE WARNING)"
+      ansible.builtin.debug:
+        msg:
+          - "WARNING: Checksum markers not found. Fell back to raw file discovery."
+          - "Selected: {{ _r_date }}"
+          - "RISK: If a backup is currently running, this might pick an incomplete file."
+          - "ADVICE: Enable 'mneme_generate_checksum: true' for atomic safety."
+      when: not _is_safe_mode
+
+  # Trigger block only if input is 'latest'
+  when:
+    - mneme_restore_target_date is defined
+    - mneme_restore_target_date == 'latest'
+
+# =============================================================================
+# 2. Validation & Constants
+# =============================================================================
+- name: "RESTORE_PREPARE | Validate input"
+  ansible.builtin.assert:
+    that:
+      - _r_date is defined
+      # Validate the computed _r_date, not the raw input
+      - _r_date | regex_search('^\\d{4}-\\d{2}-\\d{2}$')
+    fail_msg: "CRITICAL: Target date could not be resolved. Got: '{{ _r_date }}'"
+
+- name: "RESTORE_PREPARE | Define artifacts paths"
+  ansible.builtin.set_fact:
+    _r_work_dir: "{{ mneme_temp_dir }}/restore_{{ _r_date }}"
+    _r_prepare_timeout: "{{ mneme_restore_prepare_timeout | default(14400) }}"
+    _r_internal_folder: "mneme_{{ _r_type }}_{{ _r_date }}"
+    _r_archive_data: "{{ mneme_archive_dir }}/mneme_{{ _r_type }}_{{ _r_date }}.tar.gz"
+    _r_archive_schema: "{{ mneme_archive_dir }}/mneme_schema_{{ _r_type }}_{{ _r_date }}.tar.gz"
+    _r_marker_file: "{{ mneme_temp_dir }}/restore_{{ _r_date }}/.prepare_complete"
+
+- name: "RESTORE_PREPARE | Check if checksum file exists"
+  ansible.builtin.stat:
+    path: "{{ _r_archive_data }}.sha256"
+  register: _checksum_file_stat
+
+# -----------------------------------------------------------------------------
+# 2. Idempotency Check
+# -----------------------------------------------------------------------------
+- name: "RESTORE_PREPARE | Check if already prepared"
+  ansible.builtin.stat:
+    path: "{{ _r_marker_file }}"
+  register: _r_marker_stat
+
+- name: "RESTORE_PREPARE | Skip info"
+  ansible.builtin.debug:
+    msg: "Backup already unpacked and prepared. Skipping heavy steps."
+  when: _r_marker_stat.stat.exists
+
+# -----------------------------------------------------------------------------
+# 3. Execution Block (Runs only if NOT prepared)
+# -----------------------------------------------------------------------------
+- name: "RESTORE_PREPARE | Execution Phase"
+  when: not _r_marker_stat.stat.exists
+  block:
+    # --- Clean Start ---
+    - name: "RESTORE_PREPARE | Ensure clean workspace"
+      ansible.builtin.file:
+        path: "{{ _r_work_dir }}"
+        state: "{{ item }}"
+        owner: "{{ mneme_system_user | default('mysql') }}"
+        group: "{{ mneme_system_group | default('mysql') }}"
+        mode: '0700'
+      loop:
+        - absent
+        - directory
+
+    - name: "RESTORE_PREPARE | Check archive size"
+      ansible.builtin.stat:
+        path: "{{ _r_archive_data }}"
+        get_checksum: false
+      register: _archive_stat
+
+    - name: "RESTORE_PREPARE | Check available disk space"
+      ansible.builtin.shell:
+        cmd: "set -o pipefail && df --output=avail -B1 '{{ _r_work_dir }}' | tail -n 1"
+      register: _disk_free
+      changed_when: false
+      ignore_errors: true
+
+    - name: "RESTORE_PREPARE | Assert sufficient space"
+      ansible.builtin.assert:
+        that:
+          - (_disk_free.stdout | trim) is match('^[0-9]+$')
+          - (_disk_free.stdout | trim | int) > (_archive_stat.stat.size * 3)
+        fail_msg: >-
+          Insufficient disk space in {{ _r_work_dir }}.
+          Available: {{ (_disk_free.stdout | default('0') | trim | int) | human_readable }},
+          Archive: {{ _archive_stat.stat.size | human_readable }}.
+          Need approx 3x (unpack + prepare).
+      when:
+        - _disk_free.rc == 0
+        - _archive_stat.stat.exists
+
+    # --- Pigz Detection ---
+    - name: "RESTORE_PREPARE | Check for pigz"
+      ansible.builtin.command: which pigz
+      register: _pigz_check
+      changed_when: false
+      failed_when: false
+
+    # --- Checksum Verification ---
+    - name: "RESTORE_PREPARE | Verify SHA256 checksum"
+      ansible.builtin.shell:
+        cmd: "cd '{{ mneme_archive_dir }}' && sha256sum -c '{{ _r_archive_data | basename }}.sha256'"
+      register: _checksum_verify
+      changed_when: false
+      failed_when: _checksum_verify.rc != 0
+      when: _checksum_file_stat.stat.exists
+
+    # --- Unarchive Data ---
+    - name: "RESTORE_PREPARE | Unarchive DATA"
+      ansible.builtin.unarchive:
+        src: "{{ _r_archive_data }}"
+        dest: "{{ _r_work_dir }}"
+        remote_src: true
+        extra_opts: "{{ ['--use-compress-program=pigz'] if _pigz_check.rc == 0 else [] }}"
+
+    # --- Unarchive Schema ---
+    - name: "RESTORE_PREPARE | Check Schema archive"
+      ansible.builtin.stat:
+        path: "{{ _r_archive_schema }}"
+      register: _r_stat_schema
+
+    - name: "RESTORE_PREPARE | Unarchive SCHEMA"
+      ansible.builtin.unarchive:
+        src: "{{ _r_archive_schema }}"
+        dest: "{{ _r_work_dir }}"
+        remote_src: true
+      when: _r_stat_schema.stat.exists
+
+    # --- Prepare ---
+    - name: "RESTORE_PREPARE | Run mariadb-backup prepare"
+      ansible.builtin.command: >-
+        {{ mneme_bin_path }} --prepare --export
+        --target-dir={{ _r_work_dir }}/{{ _r_internal_folder }}
+        --use-memory={{ mneme_use_memory | default('1G') }}
+      changed_when: true
+      async: "{{ _r_prepare_timeout }}"
+      poll: 30
+
+    # --- Permissions Fix (CRITICAL FIX) ---
+    - name: "RESTORE_PREPARE | Fix ownership after prepare"
+      ansible.builtin.file:
+        path: "{{ _r_work_dir }}"
+        owner: "{{ mneme_system_user | default('mysql') }}"
+        group: "{{ mneme_system_group | default('mysql') }}"
+        recurse: true
+
+    # --- Mark as Done ---
+    - name: "RESTORE_PREPARE | Create success marker"
+      ansible.builtin.file:
+        path: "{{ _r_marker_file }}"
+        state: touch
+        owner: "{{ mneme_system_user | default('mysql') }}"
+
+
+
+# -----------------------------------------------------------------------------
+# 4. Return Facts
+# -----------------------------------------------------------------------------
+- name: "RESTORE_PREPARE | Return prepared paths"
+  ansible.builtin.set_fact:
+    mneme_prepared_backup_dir: "{{ _r_work_dir }}/{{ _r_internal_folder }}"
+    mneme_prepared_schema_dir: "{{ _r_work_dir }}/mneme_schema_{{ _r_type }}_{{ _r_date }}"
+    mneme_prepared_runtime_work_dir: "{{ _r_work_dir }}"
+    mneme_prepared_runtime_date: "{{ _r_date }}"

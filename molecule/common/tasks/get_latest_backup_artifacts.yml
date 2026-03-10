@@ -1,0 +1,45 @@
+---
+# Locate latest daily data+schema archives and unarchive into temp dir.
+# Exposes:
+#   - latest_backup_date
+#   - latest_backup_dir
+
+- name: Get latest DATA archive (daily)
+  ansible.builtin.shell: "ls -t /home/data/mneme_backups/archive/mneme_daily_*.tar.gz | head -n 1"
+  register: _latest_data
+  changed_when: false
+
+- name: Assert DATA archive exists
+  ansible.builtin.assert:
+    that: _latest_data.stdout != ""
+    fail_msg: "No mneme_daily_*.tar.gz found."
+
+- name: Get latest SCHEMA archive (daily)
+  ansible.builtin.shell: "ls -t /home/data/mneme_backups/archive/mneme_schema_daily_*.tar.gz | head -n 1"
+  register: _latest_schema
+  changed_when: false
+
+- name: Assert SCHEMA archive exists
+  ansible.builtin.assert:
+    that: _latest_schema.stdout != ""
+    fail_msg: "No mneme_schema_daily_*.tar.gz found. Ensure schema backups are enabled."
+
+- name: Extract backup date (YYYY-MM-DD)
+  ansible.builtin.set_fact:
+    latest_backup_date: "{{ _latest_data.stdout | regex_search('mneme_daily_(\\d{4}-\\d{2}-\\d{2})', '\\1') | first }}"
+
+- name: Unarchive DATA backup into tmp
+  ansible.builtin.unarchive:
+    src: "{{ _latest_data.stdout }}"
+    dest: "/home/data/mneme_backups/tmp"
+    remote_src: true
+
+- name: Unarchive SCHEMA backup into tmp
+  ansible.builtin.unarchive:
+    src: "{{ _latest_schema.stdout }}"
+    dest: "/home/data/mneme_backups/tmp"
+    remote_src: true
+
+- name: Compute extracted DATA dir path
+  ansible.builtin.set_fact:
+    latest_backup_dir: "/home/data/mneme_backups/tmp/mneme_daily_{{ latest_backup_date }}"

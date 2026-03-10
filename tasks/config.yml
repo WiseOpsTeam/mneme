@@ -1,0 +1,22 @@
+---
+# Handle configuration deployment
+
+- name: Deploy mariabackup configuration
+  template:
+    src: mariabackup.cnf.j2
+    dest: /etc/mariabackup.cnf
+    owner: root
+    group: root
+    mode: '0600'
+  when: not mneme_xtrabackup_compatibility
+  no_log: true
+
+- name: Deploy xtrabackup configuration
+  template:
+    src: mariabackup.cnf.j2
+    dest: /etc/xtrabackup.cnf
+    owner: root
+    group: root
+    mode: '0600'
+  when: mneme_xtrabackup_compatibility
+  no_log: true

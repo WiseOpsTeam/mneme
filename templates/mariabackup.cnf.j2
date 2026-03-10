@@ -1,0 +1,19 @@
+# Managed by Ansible
+
+{% if not mneme_xtrabackup_compatibility %}
+[mariabackup]
+{% else %}
+[xtrabackup]
+{% endif %}
+user = {{ mneme_mysql_user }}
+password = {{ mneme_mysql_password }}
+host = {{ mneme_mysql_host }}
+port = {{ mneme_mysql_port }}
+{% if mneme_socket | length > 0 %}
+socket = {{ mneme_socket }}
+{% endif %}
+use_memory= {{ mneme_use_memory }}
+
+# Directory paths
+datadir = {{ mneme_data_dir }}
+tmpdir = {{ mneme_temp_dir }}

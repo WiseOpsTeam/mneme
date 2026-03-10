@@ -1,0 +1,271 @@
+#!/bin/bash
+# This script performs a backup using mariabackup, compresses it, and manages retention based on configurable contours.
+
+set -euo pipefail
+
+{% if mneme_prometheus_enabled %}
+# Start timer for duration calculation
+START_TIME=$(date +%s)
+{% endif %}
+
+# ============================
+# Define fail_and_exit Function Early
+# ============================
+fail_and_exit() {
+    {% if mneme_monitoring_notify_enable %}
+    backup_notify {{ mneme_monitoring_notify_port }} "{{ mneme_monitoring_notify_message_fail }}"
+    {% endif %}
+
+    {% if mneme_prometheus_enabled %}
+    if command -v update_prometheus_metrics >/dev/null; then
+        local END_TIME
+        END_TIME=$(date +%s)
+        local DURATION=$((END_TIME - START_TIME))
+        # Status 0 (Fail), Size 0
+        update_prometheus_metrics 0 "$CONTOUR_TYPE" "$DURATION" 0
+    fi
+    {% endif %}
+
+    exit 1
+}
+
+# ============================
+# Parsing arguments
+# ============================
+CONTOUR_TYPE=""
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --type) CONTOUR_TYPE="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; fail_and_exit ;;
+    esac
+    shift
+done
+
+if [ -z "$CONTOUR_TYPE" ]; then
+    echo "Contour type not specified. Use --type {daily|weekly|monthly}"
+    fail_and_exit
+fi
+
+# ============================
+# Configuration
+# ============================
+BACKUP_DIR="{{ mneme_backup_dir }}"
+LOG_DIR="{{ mneme_log_dir }}"
+ARCHIVE_DIR="{{ mneme_archive_dir }}"
+MARIABACKUP_CMD="{{ mneme_bin_path }}"
+NICENUM="{{ mneme_nice_priority }}"
+DATE=$(date +"%Y-%m-%d")
+BACKUP_NAME="mneme_${CONTOUR_TYPE}_${DATE}"
+BACKUP_SCHEME_NAME="mneme_schema_${CONTOUR_TYPE}_${DATE}"
+COMPRESSED_BACKUP="${ARCHIVE_DIR}/${BACKUP_NAME}.tar.gz"
+{% if mneme_databases_schemes_include | length > 0 %}
+MYSQLDUMP_CMD="{{ mneme_mariadb_dump_bin_path }}"
+COMPRESSED_SCHEMA_BACKUP="${ARCHIVE_DIR}/${BACKUP_SCHEME_NAME}.tar.gz"
+{% endif %}
+{% if mneme_xtrabackup_compatibility %}
+DEFAULTS_FILE="/etc/xtrabackup.cnf"
+{% else %}
+DEFAULTS_FILE="/etc/mariabackup.cnf"
+{% endif %}
+LOGFILE="${LOG_DIR}/backup_${CONTOUR_TYPE}_${DATE}.log"
+PID_FILE="/var/run/mneme_wrapper.pid"
+
+# ============================
+# Logging Setup
+# ============================
+
+# Ensure log directory exists
+if [ ! -d "${LOG_DIR}" ]; then
+    echo "Log directory ${LOG_DIR} does not exist. Exiting."
+    fail_and_exit
+fi
+
+# Redirect all stdout and stderr to the log file
+exec > >(tee -a "${LOGFILE}") 2>&1
+
+# Logging function
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+# ============================
+# Source library functions
+# ============================
+SCRIPT_DIR="/usr/local/lib/mariabackup"
+
+if [ -f "${SCRIPT_DIR}/retention.sh" ]; then
+    source "${SCRIPT_DIR}/retention.sh"
+fi
+
+if [ -f "${SCRIPT_DIR}/monitoring.sh" ]; then
+    source "${SCRIPT_DIR}/monitoring.sh"
+fi
+
+if [ -f "${SCRIPT_DIR}/replication.sh" ]; then
+    source "${SCRIPT_DIR}/replication.sh"
+fi
+
+if [ -f "${SCRIPT_DIR}/prometheus.sh" ]; then
+    source "${SCRIPT_DIR}/prometheus.sh"
+fi
+# ============================
+# Clean-up of the incomplete backups and locks
+# ============================
+
+cleanup() {
+    {% if mneme_safe_slave_autorestore_replication %}
+    log "Restoring replication before performing cleanup."
+    start_replication
+    {% endif %}
+    log "Cleaning up uncompressed and partially completed backups."
+    rm -rf "${BACKUP_DIR:?}/${BACKUP_NAME:?}" || true
+    rm -rf "${BACKUP_DIR:?}/${BACKUP_SCHEME_NAME:?}" || true
+    rm -f "${PID_FILE}" || true
+    log "Cleanup completed."
+    manage_retention_contours "$CONTOUR_TYPE"
+    log "Emergency retention contours cleanup completed."
+    trap - SIGINT SIGTERM ERR EXIT
+}
+
+# Check if PID file exists
+if [ -f "${PID_FILE}" ]; then
+    PID=$(cat "${PID_FILE}")
+    if kill -0 "${PID}" 2>/dev/null; then
+        echo "Another instance of the script is already running with PID ${PID}. Exiting."
+        fail_and_exit
+    else
+        echo "Stale PID file found. Removing it."
+        rm -f "${PID_FILE}"
+    fi
+fi
+
+# Create PID file with the current process ID
+touch "${PID_FILE}"
+chmod 600 "${PID_FILE}"
+echo $$ > "${PID_FILE}"
+
+# Trap signals and cleanup on exit
+# EXIT trap ensures cleanup always runs (even after fail_and_exit calls exit 1)
+trap cleanup EXIT
+# ERR/SIGINT traps ensure we report failure metrics before exiting
+trap fail_and_exit SIGINT SIGTERM ERR
+
+# ============================
+# Backup Process
+# ============================
+
+# Construct mariabackup command
+MARIABACKUP=("${MARIABACKUP_CMD}" "--defaults-file=${DEFAULTS_FILE}" "--backup" "--target-dir=${BACKUP_DIR}/${BACKUP_NAME}")
+
+# Validate partial backup options to avoid conflicts
+{% if mneme_databases_include | length > 0 %}
+MARIABACKUP+=("--databases={{ mneme_databases_include | join(' ') }}")
+{% endif %}
+{% if mneme_databases_exclude | length > 0 %}
+MARIABACKUP+=("--databases-exclude={{ mneme_databases_exclude | join(' ') }}")
+{% endif %}
+{% if mneme_tables_include | length > 0 %}
+MARIABACKUP+=("--tables={{ mneme_tables_include }}")
+{% endif %}
+{% if mneme_tables_exclude | length > 0 %}
+MARIABACKUP+=("--tables-exclude={{ mneme_tables_exclude }}")
+{% endif %}
+{% if mneme_safe_slave_backup %}
+MARIABACKUP+=("--safe-slave-backup")
+{% endif %}
+{% if mneme_safe_slave_backup %}
+MARIABACKUP+=("--safe-slave-backup-timeout={{ mneme_safe_slave_backup_timeout }}")
+{% endif %}
+{% if mneme_safe_info %}
+MARIABACKUP+=("--slave-info")
+{% endif %}
+
+# Perform the backup with nice
+log "Starting backup: ${BACKUP_NAME}"
+nice -n "${NICENUM}" "${MARIABACKUP[@]}"
+
+{% if mneme_prepare_backup %}
+# Prepare the backup before archiving
+log "Preparing backup: ${BACKUP_NAME}"
+"${MARIABACKUP_CMD}" --prepare --export --target-dir="${BACKUP_DIR}/${BACKUP_NAME}"
+{% endif %}
+
+{% if mneme_compress %}
+log "Compressing backup using pigz: ${COMPRESSED_BACKUP}"
+nice -n "${NICENUM}" sh -c "tar -cf - -C '${BACKUP_DIR}' '${BACKUP_NAME}' | pigz -{{ mneme_compression_level }}{% if mneme_pigz_processes is defined %} -p {{ mneme_pigz_processes }}{% endif %} > '${COMPRESSED_BACKUP}'"
+{% else %}
+COMPRESSED_BACKUP="${BACKUP_DIR}/${BACKUP_NAME}.tar"
+log "Creating tar archive: ${COMPRESSED_BACKUP}"
+tar -cf "${COMPRESSED_BACKUP}" -C "${BACKUP_DIR}" "${BACKUP_NAME}"
+{% endif %}
+chmod 600 "${COMPRESSED_BACKUP}"
+
+# Remove the uncompressed backup directory to save space
+log "Removing uncompressed backup directory: ${BACKUP_DIR}/${BACKUP_NAME}"
+rm -rf "${BACKUP_DIR:?}/${BACKUP_NAME:?}"
+
+{% if mneme_databases_schemes_include | length > 0 %}
+# Add the schemas without data for the predefined list of databases
+log "Dumping schemas for databases: {{ mneme_databases_schemes_include | join(', ') }}"
+mkdir -p "${BACKUP_DIR}/${BACKUP_SCHEME_NAME}" || { log "Failed to create schema backup directory. Exiting."; fail_and_exit; }
+
+# shellcheck disable=SC2043
+for db in {{ mneme_databases_schemes_include | join(' ') }}; do
+    log "Dumping schema for database: $db"
+    "${MYSQLDUMP_CMD}" -u "{{ mneme_mysql_user }}" --host="{{ mneme_mysql_host }}" --port="{{ mneme_mysql_port }}" --no-data --single-transaction --databases "$db" > "${BACKUP_DIR}/${BACKUP_SCHEME_NAME}/${db}_schema.sql"
+done
+
+# Compress the schemas backup
+log "Compressing schemas backup using pigz: ${COMPRESSED_SCHEMA_BACKUP}"
+tar -cf - -C "${BACKUP_DIR}" "${BACKUP_SCHEME_NAME}" | pigz -{{ mneme_compression_level }}{% if mneme_pigz_processes is defined %} -p {{ mneme_pigz_processes }}{% endif %} > "${COMPRESSED_SCHEMA_BACKUP}"
+chmod 600 "${COMPRESSED_SCHEMA_BACKUP}"
+
+{% if mneme_verify_archive %}
+# Verify archive integrity
+log "Verifying archive integrity..."
+if ! tar -tzf "${COMPRESSED_BACKUP}" > /dev/null 2>&1; then
+    log "ERROR: Archive verification failed: ${COMPRESSED_BACKUP}"
+    rm -f "${COMPRESSED_BACKUP}"
+    fail_and_exit
+fi
+{% endif %}
+
+{% if mneme_generate_checksum %}
+# Generate checksum
+sha256sum "${COMPRESSED_BACKUP}" > "${COMPRESSED_BACKUP}.sha256"
+chmod 600 "${COMPRESSED_BACKUP}.sha256"
+log "Checksum saved: ${COMPRESSED_BACKUP}.sha256"
+{% endif %}
+
+# Remove the uncompressed schemas backup directory
+log "Removing uncompressed schemas backup directory: ${BACKUP_DIR}/${BACKUP_SCHEME_NAME}"
+rm -rf "${BACKUP_DIR:?}/${BACKUP_SCHEME_NAME:?}"
+{% endif %}
+
+# Manage retention: Remove outdated backups based on retention contours
+manage_retention_contours "$CONTOUR_TYPE"
+
+log "Backup completed successfully: ${COMPRESSED_BACKUP}"
+{% if mneme_monitoring_notify_enable %}
+backup_notify {{ mneme_monitoring_notify_port }} "{{ mneme_monitoring_notify_message_success }}"
+{% endif %}
+
+{% if mneme_prometheus_enabled %}
+if command -v update_prometheus_metrics >/dev/null; then
+    END_TIME=$(date +%s)
+    DURATION=$((END_TIME - START_TIME))
+
+    if [ -f "${COMPRESSED_BACKUP}" ]; then
+        BACKUP_SIZE=$(stat -c%s "${COMPRESSED_BACKUP}")
+    else
+        BACKUP_SIZE=0
+    fi
+
+    # Status 1 (Success)
+    update_prometheus_metrics 1 "$CONTOUR_TYPE" "$DURATION" "$BACKUP_SIZE"
+fi
+{% endif %}
+
+# Disable trap and remove the pid file
+rm -f "${PID_FILE}" || log "Failed to remove pid file. Please check manually."
+trap - SIGINT SIGTERM ERR EXIT

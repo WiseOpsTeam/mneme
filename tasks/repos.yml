@@ -1,0 +1,11 @@
+---
+# Handles repository installation
+
+- name: Add optional repos
+  include_tasks: install_repos.yml
+  when: mneme_install_repo
+
+- name: Display message if repository installation is skipped
+  debug:
+    msg: "Repository installation is skipped because mneme_install_repo = {{ mneme_install_repo }}. Make sure MariaDB repository is installed by other means."
+  when: not mneme_install_repo 

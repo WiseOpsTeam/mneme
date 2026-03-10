@@ -1,0 +1,70 @@
+---
+
+- name: Add official MariaDB repository
+  yum_repository:
+    name: MariaDB
+    description: "Official MariaDB repository"
+    baseurl: "{{ mneme_mariadb_repo_url_rocky_8_9 }}"
+    gpgkey: https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+    gpgcheck: true
+    module_hotfixes: true
+  when:
+    - mneme_install_repo
+    - ansible_distribution in ["Rocky", "OracleLinux"]
+    - ansible_distribution_major_version | int > 7
+
+- name: Add official MariaDB repository
+  yum_repository:
+    name: MariaDB
+    description: "Official MariaDB repository"
+    baseurl: "{{ mneme_mariadb_repo_url_rhel_9 }}"
+    gpgkey: https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+    gpgcheck: true
+    module_hotfixes: true
+  when:
+    - mneme_install_repo
+    - ansible_distribution == "RedHat"
+    - ansible_distribution_major_version | int >= 9
+
+- name: Add MariaDB archive repository for deprecated OS
+  yum_repository:
+    name: MariaDB_archive
+    description: "MariaDB {{ mneme_mariadb_version }} archive repository"
+    baseurl: "{{ mneme_mariadb_repo_url_ol_7 }}"
+    gpgkey: https://archive.mariadb.org/PublicKey
+    gpgcheck: yes
+  when:
+    - mneme_install_repo
+    - ansible_distribution == "OracleLinux"
+    - ansible_distribution_major_version | int <= 7
+
+- name: Remove official MariaDB repository for deprecated OS
+  ansible.builtin.file:
+    path: /etc/yum.repos.d/MariaDB.repo
+    state: absent
+  when:
+    - mneme_install_repo
+    - ansible_distribution == "OracleLinux"
+    - ansible_distribution_major_version | int <= 7
+
+- name: Install repository key
+  rpm_key:
+    state: present
+    key: "{{ mneme_epel_repo_key_url }}"
+  when:
+    - mneme_install_repo
+    - ansible_distribution == "OracleLinux"
+    - ansible_distribution_major_version | int <= 7
+
+- name: Install EPEL repo package from a remote repo for deprecated OS
+  yum:
+    name: "{{ mneme_epel_repo_archive_url }}"
+    state: present
+  register: result
+  until: result is not failed
+  retries: 10
+  delay: 10
+  when:
+    - mneme_install_repo
+    - ansible_distribution == "OracleLinux"
+    - ansible_distribution_major_version | int <= 7

@@ -1,0 +1,95 @@
+---
+
+- name: Prepare | Bootstrap System Environment
+  hosts: all
+  become: true
+  tasks:
+    - name: Enable CodeReady Builder on RHEL 9
+      ansible.builtin.command: subscription-manager repos --enable codeready-builder-for-rhel-9-{{ ansible_architecture }}-rpms
+      when: "ansible_distribution == 'RedHat' and ansible_distribution_major_version == '9'"
+      changed_when: false
+      failed_when: false
+
+    - name: Install EPEL repository
+      ansible.builtin.dnf:
+        name: >-
+          {% if ansible_distribution == 'RedHat' %}
+          https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm
+          {% else %}
+          epel-release
+          {% endif %}
+        state: present
+        disable_gpg_check: "{{ ansible_distribution == 'RedHat' }}"
+
+    - name: Disable default mysql and mariadb modules on EL8+
+      ansible.builtin.command: "dnf -y module disable mysql mariadb"
+      changed_when: false
+      failed_when: false
+      when: "ansible_distribution_major_version in ['8', '9']"
+
+    - name: Clean dnf metadata to apply module changes
+      ansible.builtin.command: "dnf clean metadata"
+      changed_when: false
+
+    - name: Set MariaDB repository URL based on OS
+      ansible.builtin.set_fact:
+        mariadb_repo_url: >-
+          {% if ansible_distribution in ['Rocky', 'OracleLinux'] %}
+          https://yum.mariadb.org/{{ mneme_mariadb_version }}/rockylinux{{ ansible_distribution_major_version }}-amd64
+          {% elif ansible_distribution == 'RedHat' %}
+          https://yum.mariadb.org/{{ mneme_mariadb_version }}/rhel{{ ansible_distribution_major_version }}-amd64
+          {% endif %}
+
+    - name: Add official MariaDB repository for tests
+      ansible.builtin.yum_repository:
+        name: MariaDB
+        description: "MariaDB {{ mneme_mariadb_version }}"
+        baseurl: "{{ mariadb_repo_url }}"
+        gpgkey: "https://yum.mariadb.org/RPM-GPG-KEY-MariaDB"
+        gpgcheck: true
+        enabled: true
+
+    - name: Install MariaDB Server and required python connector
+      ansible.builtin.package:
+        name:
+          - MariaDB-server
+          - MariaDB-devel
+          - python3-mysqlclient
+          - policycoreutils-python-utils
+        state: present
+        allowerasing: true
+
+- name: Prepare | Configure Application
+  hosts: all
+  become: true
+  tasks:
+    - name: Start and enable MariaDB service
+      ansible.builtin.service:
+        name: mariadb
+        state: started
+        enabled: true
+
+    - name: Wait for MariaDB to start up
+      ansible.builtin.wait_for:
+        port: 3306
+        host: 127.0.0.1
+        delay: 5
+        timeout: 60
+        state: started
+
+    - name: Set root password for MariaDB
+      community.mysql.mysql_user:
+        name: root
+        password: "{{ mneme_mysql_password }}"
+        login_unix_socket: /var/lib/mysql/mysql.sock
+        login_password: ""
+        state: present
+
+    - name: Create test database and table
+      community.mysql.mysql_query:
+        query:
+          - "CREATE DATABASE IF NOT EXISTS test_db;"
+          - "CREATE TABLE IF NOT EXISTS test_db.test_table (id INT, name VARCHAR(255));"
+          - "INSERT INTO test_db.test_table (id, name) VALUES (1, 'test_data') ON DUPLICATE KEY UPDATE name='test_data';"
+        login_user: root
+        login_password: "{{ mneme_mysql_password }}"

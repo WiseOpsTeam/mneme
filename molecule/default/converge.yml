@@ -1,0 +1,8 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    mneme_install_repo: false
+  roles:
+    - role: "mneme"
