@@ -4,7 +4,17 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'CHANGELOG.md'
+      - 'LICENSE.txt'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'CHANGELOG.md'
+      - 'LICENSE.txt'
 
 env:
   ANSIBLE_ROLES_PATH: ${{ github.workspace }}/..
@@ -39,7 +49,8 @@ jobs:
         run: ansible-galaxy collection install community.general community.mysql
 
       - name: Run ansible-lint
-        run: ansible-lint .
+        run: |
+          ansible-lint .
 
       - name: Run molecule test (default)
         run: molecule test -s default
