@@ -237,7 +237,3 @@ Licensed under the MIT License.
 
 Maintained by:
     **Ivan Gumeniuk**
-
-### Contributors
-
-- Ivan Gumeniuk (WiseOps)
