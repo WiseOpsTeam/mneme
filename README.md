@@ -200,7 +200,6 @@ Read **[docs/MONITORING.md](docs/MONITORING.md)** for configuration details and 
 ## TODO
 
 - check-mode for the recovery and verification modules
-- Add `restore latest` with autodiscovery (SHA256 first, direct archive search as a fallback). (done)
 - Post-backup hooks to call encryption/rclone or trigger something similar (mneme_post_backup_cmd/mneme_post_backup_failed_cmd)
 - Selinux enforcement support
 - Ubuntu/Debian support
