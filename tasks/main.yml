@@ -1,7 +1,7 @@
 ---
 
 - name: Include variables specific to OS release
-  include_vars: "{{ item }}"
+  ansible.builtin.include_vars: "{{ item }}"
   with_first_found:
     - "{{ ansible_distribution | lower }}-{{ ansible_distribution_major_version }}.yml"
     - "{{ ansible_distribution | lower }}.yml"
@@ -21,25 +21,25 @@
   tags: [always, mneme_config_check]
 
 - name: Add repositories
-  import_tasks: repos.yml
+  ansible.builtin.import_tasks: repos.yml
   tags: [mneme_repos, mneme_install]
 
 - name: Install packages
-  import_tasks: install.yml
+  ansible.builtin.import_tasks: install.yml
   tags: [mneme_install]
 
 - name: Setup directories
-  import_tasks: directories.yml
+  ansible.builtin.import_tasks: directories.yml
   tags: [mneme_setup]
 
 - name: Deploy configuration
-  import_tasks: config.yml
+  ansible.builtin.import_tasks: config.yml
   tags: [mneme_config]
 
 - name: Deploy scripts
-  import_tasks: scripts.yml
+  ansible.builtin.import_tasks: scripts.yml
   tags: [mneme_scripts]
 
 - name: Configure cron jobs
-  import_tasks: cron.yml
+  ansible.builtin.import_tasks: cron.yml
   tags: [mneme_cron]

@@ -38,6 +38,9 @@ jobs:
       - name: Install Ansible Collections
         run: ansible-galaxy collection install community.general community.mysql
 
+      - name: Run ansible-lint
+        run: ansible-lint .
+
       - name: Run molecule test (default)
         run: molecule test -s default
 

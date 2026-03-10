@@ -2,7 +2,7 @@
 # Handle directory creation
 
 - name: Ensure backup directory exists
-  file:
+  ansible.builtin.file:
     path: "{{ mneme_backup_dir }}"
     state: directory
     owner: "{{ mneme_backup_script_owner }}"
@@ -10,7 +10,7 @@
     mode: '0755'
 
 - name: Ensure log directory exists
-  file:
+  ansible.builtin.file:
     path: "{{ mneme_log_dir }}"
     state: directory
     owner: "{{ mneme_backup_script_owner }}"
@@ -18,7 +18,7 @@
     mode: '0755'
 
 - name: Ensure temp directory exists
-  file:
+  ansible.builtin.file:
     path: "{{ mneme_temp_dir }}"
     state: directory
     owner: "{{ mneme_backup_script_owner }}"
@@ -26,7 +26,7 @@
     mode: '0755'
 
 - name: Ensure archive directory exists
-  file:
+  ansible.builtin.file:
     path: "{{ mneme_archive_dir }}"
     state: directory
     owner: "{{ mneme_backup_script_owner }}"

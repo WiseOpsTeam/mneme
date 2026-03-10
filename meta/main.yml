@@ -9,16 +9,15 @@ galaxy_info:
   platforms:
     - name: EL
       versions:
-        - 8
-        - 9
+        - "8"
+        - "9"
   galaxy_tags:
     - backup
     - database
     - mariadb
     - mysql
-    - disaster-recovery
+    - disasterrecovery
     - mariabackup
   issue_tracker_url: https://github.com/wiseops-team/mneme/issues
-  repository: https://github.com/wiseops-team/mneme
 
 dependencies: []
