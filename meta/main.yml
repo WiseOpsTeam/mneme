@@ -1,8 +1,8 @@
 ---
 galaxy_info:
-  author: WiseOps
+  author: Ivan Gumeniuk
   role_name: mneme
-  namespace: wiseops
+  namespace: wiseops_team
   description: MySQL Native Ephemeral Management Engine (mneme). A role to manage MariaDB backups using mariabackup.
   license: MIT
   min_ansible_version: 2.9

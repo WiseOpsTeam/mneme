@@ -26,6 +26,11 @@ roles:
     version: main # Or specify a release tag, e.g., 2.0.0
 ```
 
+Install it using ansible-galaxy:
+```
+ansible-galaxy install -r requirements.yml
+```
+
 **1. Add to your Playbook:**
 ```yaml
 - hosts: db_servers
