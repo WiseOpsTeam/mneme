@@ -1,5 +1,7 @@
 [![CI](https://github.com/wiseops-team/mneme/actions/workflows/ci.yml/badge.svg)](https://github.com/wiseops-team/mneme/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ansible Version](https://img.shields.io/badge/ansible-v2.16%20%2B-blue)](https://galaxy.ansible.com/ui/standalone/roles/wiseops_team/mneme/)
+[![Platforms](https://img.shields.io/badge/platforms-EL%208%20|%209-lightgrey)](https://galaxy.ansible.com/ui/standalone/roles/wiseops_team/mneme/)
 # **mneme** - MySQL Native Ephemeral Management Engine
 
 **Production-Grade Backup & Disaster Recovery as Code for MariaDB.**
