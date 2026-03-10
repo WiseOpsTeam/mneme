@@ -1,4 +1,4 @@
-# **mneme**
+# **mneme** - MySQL Native Ephemeral Management Engine
 
 **Production-Grade Backup & Disaster Recovery as Code for MariaDB.**
 
