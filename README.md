@@ -6,7 +6,7 @@
 
 **Production-Grade Backup & Disaster Recovery as Code for MariaDB.**
 
-An enterprise-grade Ansible role designed to manage the full lifecycle of data protection. Unlike legacy roles that merely configure cron jobs, `mariabackup` treats restoration as a first-class citizen.
+An enterprise-grade Ansible role designed to manage the full lifecycle of data protection. Unlike legacy roles that merely configure cron jobs, `mneme` treats restoration as a first-class citizen.
 It includes a dedicated custom Ansible module (`mneme_restore`) that enables **Declarative Recovery**, allowing you to integrate disaster recovery drills directly into your CI/CD pipelines.
 
 ## Quick Start
