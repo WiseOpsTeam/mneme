@@ -16,7 +16,7 @@ galaxy_info:
     - database
     - mariadb
     - mysql
-    - disasterrecovery
+    - drp
     - mariabackup
   issue_tracker_url: https://github.com/wiseops-team/mneme/issues
 
