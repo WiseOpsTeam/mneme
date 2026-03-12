@@ -211,7 +211,7 @@
   tasks:
     - name: Load role default variables for verification
       ansible.builtin.include_vars:
-        file: ../../defaults/main.yml
+        file: ../../../roles/backup/defaults/main.yml
     - name: "SETUP: Create mock backup archives for rotation test"
       block:
         - name: Ensure mock files exist
