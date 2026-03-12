@@ -21,6 +21,7 @@ on:
 env:
   ANSIBLE_ROLES_PATH: ${{ github.workspace }}/..
   ANSIBLE_FORCE_COLOR: '1'
+  MOLECULE_GLOB: 'tests/molecule/*/molecule.yml'
 
 jobs:
   lint_and_test:
@@ -50,18 +51,17 @@ jobs:
       - name: Install Ansible Collections
         run: ansible-galaxy collection install community.general community.mysql
 
+      - name: Run yamllint
+        run: yamllint .
+
       - name: Run ansible-lint
-        run: |
-          ansible-lint .
+        run: ansible-lint .
 
       - name: Run molecule test (default)
         run: molecule test -s default
-        working-directory: tests/molecule
 
       - name: Run molecule test (restore_integration)
         run: molecule test -s restore_integration
-        working-directory: tests/molecule
 
       - name: Run molecule test (partial_backup_test)
         run: molecule test -s partial_backup_test
-        working-directory: tests/molecule

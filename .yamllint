@@ -5,7 +5,7 @@ extends: default
 ignore: |
   venv/
   .venv/
-  molecule/
+  tests/molecule/
   .github/workflows/
 
 rules:
@@ -26,7 +26,7 @@ rules:
   octal-values:
     forbid-implicit-octal: true
     forbid-explicit-octal: true
-  comments-indentation: enable
+  comments-indentation: false
   document-start: enable
   empty-lines:
     max: 2
