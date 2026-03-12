@@ -1,7 +1,7 @@
 # Disaster Recovery Runbook: Restoring Backups
 
 This document provides a consolidated guide for restoring MariaDB backups created by this Ansible role.
-Unlike legacy methods involving manual CLI scripts, restoration is now handled via the idempotent Ansible module `mneme_restore`.
+Unlike legacy methods involving manual CLI scripts, restoration is now handled via the idempotent Ansible module `wiseops_team.mneme.restore`.
 
 ## 1. Restoration Strategies
 
@@ -32,8 +32,8 @@ Add this task to the beginning of your playbook:
 tasks:
   - name: Prepare Backup Artifacts
     ansible.builtin.include_role:
-      name: mneme
-      tasks_from: restore_prepare
+      name: wiseops_team.mneme.restore
+      tasks_from: prepare
     vars:
       # Optional: Date of the backup (YYYY-MM-DD) or the default 'latest' will be used
       mneme_restore_target_date: "2025-07-20"
@@ -78,23 +78,23 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
 ```yaml
 - name: Prepare Backup Artifacts
   ansible.builtin.include_role:
-    name: mneme
-    tasks_from: restore_prepare
+    name: wiseops_team.mneme.restore
+    tasks_from: prepare
   vars:
     mneme_restore_target_date: "latest"
     
 - name: Restore 'users' table safely
-  mneme_restore:
-    strategy: sidecar
-    backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-    database: "very_important_database"
-    table: 
-      - "users"
-    # Binaries (from role defaults)
-    client_bin: "{{ mneme_mariadb_bin_path }}"
-    dump_bin: "{{ mneme_mariadb_dump_bin_path }}"
-    mysqld_bin: "{{ mneme_mysqld_bin_path }}"
-    login_config: /root/.my.cnf
+  wiseops_team.mneme.restore:
+  strategy: sidecar
+  backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
+  database: "very_important_database"
+  table: 
+    - "users"
+  # Binaries (from role defaults)
+  client_bin: "{{ mneme_mariadb_bin_path }}"
+  dump_bin: "{{ mneme_mariadb_dump_bin_path }}"
+  mysqld_bin: "{{ mneme_mysqld_bin_path }}"
+  login_config: /root/.my.cnf
 ```
 
 ### Scenario B: "I dropped the whole client database" (Bulk Restore)
@@ -105,24 +105,24 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
 ```yaml
 - name: Prepare Backup Artifacts
   ansible.builtin.include_role:
-    name: mneme
-    tasks_from: restore_prepare
+    name: wiseops_team.mneme.restore
+    tasks_from: prepare
   vars:
     mneme_restore_target_date: "latest"
     
 - name: Restore entire database (Auto-Discovery)
-  mneme_restore:
-    strategy: direct
-    backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-    database: "very_important_database"
-    # table: <omitted> -> triggers auto-discovery of all tables
-    
-    # Schema is required to re-create tables if they were dropped
-    schema_file: "{{ mneme_prepared_schema_dir }}/very_important_database_schema.sql"    
-    force: true # Required for Direct strategy
-    
-    client_bin: "{{ mneme_mariadb_bin_path }}"
-    login_config: /root/.my.cnf
+  wiseops_team.mneme.restore:
+  strategy: direct
+  backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
+  database: "very_important_database"
+  # table: <omitted> -> triggers auto-discovery of all tables
+  
+  # Schema is required to re-create tables if they were dropped
+  schema_file: "{{ mneme_prepared_schema_dir }}/very_important_database_schema.sql"    
+  force: true # Required for Direct strategy
+  
+  client_bin: "{{ mneme_mariadb_bin_path }}"
+  login_config: /root/.my.cnf
 ```
 
 ### Scenario C: "Server Crash / Disaster Recovery" (Full Instance)
@@ -153,16 +153,16 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
         
     - name: Prepare Backup Artifacts
       ansible.builtin.include_role:
-        name: mneme
-        tasks_from: restore_prepare
+        name: wiseops_team.mneme.restore
+        tasks_from: prepare
         
     - name: Copy-Back Backup files
-      mneme_restore:
-        strategy: copy_back
-        backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-        datadir: /var/lib/mysql
-        mneme_bin: "{{ mneme_bin_path }}"
-        force: true
+      wiseops_team.mneme.restore:
+      strategy: copy_back
+      backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
+      datadir: /var/lib/mysql
+      mneme_bin: "{{ mneme_bin_path }}"
+      force: true
 
     - name: Start MariaDB
       ansible.builtin.service: name=mariadb state=started
@@ -196,16 +196,16 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
         
     - name: Prepare Backup Artifacts
       ansible.builtin.include_role:
-        name: mneme
-        tasks_from: restore_prepare
+        name: wiseops_team.mneme.restore
+        tasks_from: prepare
         
     - name: Move-Back Backup files (Almost instant on same FS)
-      mneme_restore:
-        strategy: move_back
-        backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-        datadir: /var/lib/mysql
-        mneme_bin: "{{ mneme_bin_path }}"
-        force: true
+      wiseops_team.mneme.restore:
+      strategy: move_back
+      backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
+      datadir: /var/lib/mysql
+      mneme_bin: "{{ mneme_bin_path }}"
+      force: true
 
     - name: Start MariaDB
       ansible.builtin.service: name=mariadb state=started
@@ -234,13 +234,13 @@ To prevent this, you **MUST** use Ansible's native asynchronous mode (`async` an
 
 ```yaml
 - name: FULL DISASTER RECOVERY (Async Mode)
-  mneme_restore:
-    strategy: copy_back
-    # Use the fact generated by the prepare task
-    backup_dir: "{{ mneme_prepared_backup_dir }}"
-    datadir: /var/lib/mysql
-    mneme_bin: "{{ mneme_bin_path }}"
-    force: true
+  wiseops_team.mneme.restore:
+  strategy: copy_back
+  # Use the fact generated by the prepare task
+  backup_dir: "{{ mneme_prepared_backup_dir }}"
+  datadir: /var/lib/mysql
+  mneme_bin: "{{ mneme_bin_path }}"
+  force: true
   # Fire-and-forget logic to survive SSH timeouts:
   async: 28800  # Maximum allowed runtime in seconds (e.g., 8 hours)
   poll: 60      # Check status every 60 seconds
@@ -301,8 +301,8 @@ To remove the temporary unarchived data and save disk space, use the `restore_cl
   post_tasks:
     - name: Cleanup Restore Artifacts
       ansible.builtin.include_role:
-        name: mneme
-        tasks_from: restore_cleanup
+        name: wiseops_team.mneme.restore
+        tasks_from: cleanup
       vars:
         # Must match the date used in preparation
         mneme_restore_target_date: "2025-07-20"

@@ -1,0 +1,40 @@
+---
+namespace: wiseops_team
+name: mneme
+version: 1.0.0
+readme: README.md
+authors:
+  - Ivan Gumeniuk <IMHIO LTD>
+description: >-
+  MySQL Native Ephemeral Management Engine (mneme).
+  Production-grade backup, disaster recovery & verification for MariaDB
+  using mariabackup.
+license_file: LICENSE.txt
+tags:
+  - backup
+  - database
+  - mariadb
+  - mysql
+  - mariabackup
+  - disaster_recovery
+  - restore
+  - drp
+dependencies:
+  community.general: ">=1.0.0"
+  community.mysql: ">=1.0.0"
+repository: https://github.com/WiseOpsTeam/mneme
+documentation: https://github.com/WiseOpsTeam/mneme/tree/main/docs
+issues: https://github.com/WiseOpsTeam/mneme/issues
+build_ignore:
+  - tests
+  - molecule
+  - .github
+  - .gitignore
+  - .yamllint
+  - requirements.txt
+  - "*.tar.gz"
+  - venv
+  - .venv
+  - .gitlab-ci.yml
+  - .idea
+  - __pycache__

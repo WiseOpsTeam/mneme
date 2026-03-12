@@ -9,6 +9,6 @@
     # (Optional) speed-up restore if wrapper prepares the backup
     mneme_prepare_backup: true
   roles:
-    - role: "mneme"
+    - role: wiseops_team.mneme.backup
   tags:
     - mneme_setup

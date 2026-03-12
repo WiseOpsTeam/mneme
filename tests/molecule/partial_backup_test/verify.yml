@@ -121,7 +121,7 @@
             login_password: "{{ mneme_mysql_password }}"
 
         - name: Execute Restore via Module (Sidecar)
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: sidecar
             database: "{{ db_name }}"
             table: "{{ table_name }}"
@@ -167,7 +167,7 @@
             query: "DROP TABLE {{ db_name }}.part_table;"
 
         - name: Execute Restore via Module (Direct)
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: direct
             database: "{{ db_name }}"
             table: "part_table"
@@ -203,7 +203,7 @@
             query: "DROP TABLE {{ db_name }}.edge_case_table;"
 
         - name: Restore using Direct strategy (Triggers Python Schema Parser)
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: direct
             database: "{{ db_name }}"
             table: "edge_case_table"
@@ -242,7 +242,7 @@
     - name: "TEST 4: Idempotency Check"
       block:
         - name: Run Sidecar Restore Again (Should be OK/Changed)
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: sidecar
             database: "{{ db_name }}"
             table: "{{ table_name }}"
@@ -280,7 +280,7 @@
             login_password: "{{ mneme_mysql_password }}"
 
         - name: Restore ALL tables via Module (Direct + AutoDiscovery)
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: direct
             database: "{{ db_name }}"
             # table: do not include (will initiate discovery)
@@ -318,7 +318,7 @@
               - "DROP TABLE {{ db_name }}.edge_case_table;"   # edge_case_table
 
         - name: Restore explicit list of tables via Sidecar
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: sidecar
             database: "{{ db_name }}"
             table:
@@ -362,7 +362,7 @@
               - "DROP TABLE IF EXISTS {{ db_name }}.parent;"
 
         - name: Restore FK tables via Sidecar
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: sidecar
             backup_dir: "{{ latest_backup_dir }}"
             database: "{{ db_name }}"
@@ -406,7 +406,7 @@
             mode: '0755'
 
         - name: Execute Full Restore via Module
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: copy_back
             backup_dir: "{{ latest_backup_dir }}"
             datadir: /var/lib/mysql
@@ -457,7 +457,7 @@
           changed_when: true
 
         - name: Execute Move-Back Restore
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: move_back
             backup_dir: "{{ latest_backup_dir }}_move_test" # Use copy
             datadir: /var/lib/mysql
@@ -505,7 +505,7 @@
     - name: "TEST 9: Verify Module (Drill Mode)"
       block:
         - name: "9.1 Verify Specific Table (Happy Path)"
-          mneme_verify:
+          wiseops_team.mneme.verify:
             backup_dir: "{{ latest_backup_dir }}"
             database: "{{ db_name }}"
             table: ["{{ table_name }}"]
@@ -523,7 +523,7 @@
               - "'Verification successful' in verify_specific.msg"
 
         - name: "9.2 Verify Random Tables (Happy Path)"
-          mneme_verify:
+          wiseops_team.mneme.verify:
             backup_dir: "{{ latest_backup_dir }}"
             database: "{{ db_name }}"
             random_tables_count: 1
@@ -537,7 +537,7 @@
               - verify_random.tables_verified | length > 0
 
         - name: "9.3 Verify Failure Handling (Bad Query)"
-          mneme_verify:
+          wiseops_team.mneme.verify:
             backup_dir: "{{ latest_backup_dir }}"
             database: "{{ db_name }}"
             table: ["{{ table_name }}"]
@@ -572,7 +572,7 @@
     - name: "TEST 10: Security - Path Traversal Prevention"
       block:
         - name: "10.1 Attempt path traversal in database name"
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: direct
             backup_dir: "{{ latest_backup_dir }}"
             database: "../../../etc"
@@ -594,7 +594,7 @@
             fail_msg: "SECURITY FAIL: Path traversal was not blocked!"
 
         - name: "10.2 Attempt SQL injection in table name"
-          mneme_restore:
+          wiseops_team.mneme.restore:
             strategy: sidecar
             backup_dir: "{{ latest_backup_dir }}"
             database: "{{ db_name }}"
@@ -718,8 +718,8 @@
 
         - name: "ACTION | Run restore_prepare with 'latest' (Fallback)"
           ansible.builtin.include_role:
-            name: mneme
-            tasks_from: restore_prepare
+            name: wiseops_team.mneme.restore
+            tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
             mneme_restore_target_date: "latest"
@@ -745,8 +745,8 @@
 
         - name: "ACTION | Run restore_prepare with 'latest' (Safe Mode)"
           ansible.builtin.include_role:
-            name: mneme
-            tasks_from: restore_prepare
+            name: wiseops_team.mneme.restore
+            tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
             mneme_restore_target_date: "latest"
@@ -764,8 +764,8 @@
       block:
         - name: "ACTION | Run restore_prepare for DAILY type"
           ansible.builtin.include_role:
-            name: mneme
-            tasks_from: restore_prepare
+            name: wiseops_team.mneme.restore
+            tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
             mneme_restore_target_date: "latest"
@@ -803,8 +803,8 @@
             # --- TRY ---
             - name: "Run restore_prepare (Should Fail)"
               ansible.builtin.include_role:
-                name: mneme
-                tasks_from: restore_prepare
+                name: wiseops_team.mneme.restore
+                tasks_from: prepare
               vars:
                 mneme_archive_dir: "/tmp/integrity_test"
                 mneme_restore_target_date: "latest"

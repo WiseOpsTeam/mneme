@@ -1,10 +1,10 @@
 # Backup Verification & Disaster Recovery Drills
 
-Trusting a backup without testing it is a strategy for failure. This role includes a dedicated module `mneme_verify` designed to be part of your CI/CD pipeline or nightly cron jobs.
+Trusting a backup without testing it is a strategy for failure. This role includes a dedicated module `wiseops_team.mneme.verify` designed to be part of your CI/CD pipeline or nightly cron jobs.
 
 ## How It Works (The "Ephemeral" Concept)
 
-The `mneme_verify` module performs a **Safe, Ephemeral Restore**:
+The `wiseops_team.mneme.verify` module performs a **Safe, Ephemeral Restore**:
 
 1.  **Isolation:** It spins up a temporary MariaDB instance (Sidecar) reading directly from the backup files.
 2.  **Sandboxing:** It creates a temporary database on the target server (e.g., `verify_a1b2c3d4`).
@@ -22,7 +22,7 @@ Check if the backup is readable and 3 random tables can be physically restored.
 
 ```yaml
 - name: Smoke Test (Random Tables)
-  mneme_verify:
+  wiseops_team.mneme.verify:
     backup_dir: "{{ latest_backup_dir }}"
     database: "production_db" # The DB name inside the backup
     random_tables_count: 3
@@ -34,7 +34,7 @@ Verify that critical data exists (e.g., "Yesterday's orders are present").
 
 ```yaml
 - name: Verify Recent Orders
-  mneme_verify:
+  wiseops_team.mneme.verify:
     backup_dir: "{{ latest_backup_dir }}"
     database: "shop_db"
     table: 
@@ -46,7 +46,7 @@ Verify that critical data exists (e.g., "Yesterday's orders are present").
       HAVING count(*) > 0
 ```
 
-## Module Reference: `mneme_verify`
+## Module Reference: `wiseops_team.mneme.verify`
 
 | Argument              | Type   | Required | Description                                                    |
 |:----------------------|:-------|:---------|:---------------------------------------------------------------|

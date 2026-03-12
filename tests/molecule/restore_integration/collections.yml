@@ -1,0 +1,7 @@
+---
+collections:
+  - name: wiseops_team.mneme
+    source: "{{ lookup('env', 'PWD') }}"
+    type: dir
+  - name: community.general
+  - name: community.mysql

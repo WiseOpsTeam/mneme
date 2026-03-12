@@ -1,43 +1,42 @@
-[![CI](https://github.com/wiseops-team/mneme/actions/workflows/ci.yml/badge.svg)](https://github.com/wiseops-team/mneme/actions/workflows/ci.yml)
+[![CI](https://github.com/WiseOpsTeam/mneme/actions/workflows/ci.yml/badge.svg)](https://github.com/WiseOpsTeam/mneme/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Ansible Version](https://img.shields.io/badge/ansible-v2.16%20%2B-blue)](https://galaxy.ansible.com/ui/standalone/roles/wiseops_team/mneme/)
-[![Platforms](https://img.shields.io/badge/platforms-EL%208%20|%209-lightgrey)](https://galaxy.ansible.com/ui/standalone/roles/wiseops_team/mneme/)
+[![Ansible Version](https://img.shields.io/badge/ansible-v2.16%20%2B-blue)](https://galaxy.ansible.com/ui/repo/published/wiseops_team/mneme/)
+[![Platforms](https://img.shields.io/badge/platforms-EL%208%20|%209-lightgrey)](https://galaxy.ansible.com/ui/repo/published/wiseops_team/mneme/)
 # **mneme** - MySQL Native Ephemeral Management Engine
 
 **Production-Grade Backup & Disaster Recovery as Code for MariaDB.**
 
-An enterprise-grade Ansible role designed to manage the full lifecycle of data protection. Unlike legacy roles that merely configure cron jobs, `mneme` treats restoration as a first-class citizen.
-It includes a dedicated custom Ansible module (`mneme_restore`) that enables **Declarative Recovery**, allowing you to integrate disaster recovery drills directly into your CI/CD pipelines.
+An enterprise-grade Ansible collection designed to manage the full lifecycle of data protection. Unlike legacy roles that merely configure cron jobs, `mneme` treats restoration as a first-class citizen.
+It includes dedicated custom Ansible modules (`wiseops_team.mneme.restore`, `wiseops_team.mneme.verify`) that enable **Declarative Recovery**, allowing you to integrate disaster recovery drills directly into your CI/CD pipelines.
 
 ## Quick Start
 
-To get a simple daily backup running, add the role to your playbook and configure the database password.
-
-## Quick Start
-
-**0. Install the role**
+**0. Install the collection**
 
 The recommended way to install is via a `requirements.yml` file:
 
 ```yaml
 ---
-roles:
+collections:
   - name: wiseops_team.mneme
-    src: https://github.com/wiseops-team/mneme.git
-    scm: git
-    version: main # Or specify a release tag, e.g., 2.0.0
+    source: https://galaxy.ansible.com
 ```
 
 Install it using ansible-galaxy:
 ```
-ansible-galaxy install -r requirements.yml
+ansible-galaxy collection install -r requirements.yml
+```
+
+Or install directly:
+```
+ansible-galaxy collection install wiseops_team.mneme
 ```
 
 **1. Add to your Playbook:**
 ```yaml
 - hosts: db_servers
   roles:
-    - role: mneme
+    - role: wiseops_team.mneme.backup
 ```
 
 **2. Configure in `group_vars/db_servers.yml`:**
@@ -49,13 +48,30 @@ mneme_mysql_password: "YOUR_SECURE_PASSWORD_HERE"
 
 This will configure a daily backup job at 9 AM server time, keeping the 5 most recent backups.
 
+## Collection Structure
+
+The collection is organized into three roles:
+
+| Role | Description |
+|:-----|:------------|
+| `wiseops_team.mneme.backup` | Installation, configuration, cron scheduling, retention, and monitoring. |
+| `wiseops_team.mneme.restore` | Preparation of backup artifacts (unarchiving, permissions, `--prepare --export`). |
+| `wiseops_team.mneme.verify` | Automated backup verification drills using ephemeral restore. |
+
+And two custom modules:
+
+| Module | Description |
+|:-------|:------------|
+| `wiseops_team.mneme.restore` | Declarative recovery module supporting sidecar, direct, copy_back, and move_back strategies. |
+| `wiseops_team.mneme.verify` | Safe backup verification via ephemeral restore and validation query execution. |
+
 ## Capabilities
 
 - Full support for RHEL/CentOS systems for managing `mariabackup` configuration and scheduling.
 - Automated backups using `mariabackup`, with options for compression and retention management.
-- **Native Ansible Restore Module:** Includes a custom python module `mneme_restore` for declarative recovery. No more manual CLI scripts.
+- **Native Ansible Restore Module:** Includes a custom python module `wiseops_team.mneme.restore` for declarative recovery. No more manual CLI scripts.
 - **Automated Backup Verification (Drills):**
-  - Includes a dedicated `mneme_verify` module for CI/CD pipelines.
+  - Includes a dedicated `wiseops_team.mneme.verify` module for CI/CD pipelines.
   - **Ephemeral Testing:** Spins up a temporary instance, restores random or specific tables to a sandbox, runs validation queries, and cleans up. 
   - **Zero Impact:** Guaranteed isolation from production data. Modifies backup artifacts though. Perform on copy if needed.
 - **Flexible Recovery Strategies:** Supports four modes:
@@ -76,7 +92,7 @@ This will configure a daily backup job at 9 AM server time, keeping the 5 most r
 
 ## Requirements
 
-1. **Ansible Version**: Ansible 9.11.0 (ansible-core 2.16.x) recommended. Requires community.general and community.mysql collections.
+1. **Ansible Version**: Ansible 9.11.0 (ansible-core 2.16.x) recommended. Requires community.general and community.mysql collections (declared as dependencies).
 2. **SSH Access**: The Ansible user must have SSH access to the instance via `ansible.rsa` key.
 3. **MySQL/MariaDB**: The target system must have a MySQL/MariaDB instance installed and configured.
 
@@ -154,7 +170,7 @@ mneme_databases_schemes_include:
 
 ## Advanced Concepts
 
-For a deeper understanding of the role's internal workings, including script logic, cleanup procedures, and replication handling, please refer to our **[Technical Concepts Guide](docs/CONCEPTS.md)**.
+For a deeper understanding of the collection's internal workings, including script logic, cleanup procedures, and replication handling, please refer to our **[Technical Concepts Guide](docs/CONCEPTS.md)**.
 
 ## Backup Verification (CI/CD)
 
@@ -162,17 +178,17 @@ Validate your backups nightly without touching production data:
 
 ```yaml
 - name: Nightly Drill - Verify 3 Random Tables
-  mneme_verify:
+  wiseops_team.mneme.verify:
     backup_dir: "/home/data/mneme_backups/backup/daily-2025-12-25"
     database: "production_db"
     random_tables_count: 3
     validation_query: "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE()"
 ```
-Refer to the **[Verification Guide](docs/VERIFICATION.md)** and the `mneme_verify` module.
+Refer to the **[Verification Guide](docs/VERIFICATION.md)** and the `wiseops_team.mneme.verify` module.
 
 ## Restoring from Backup
 
-Recovery is handled via the custom `mneme_restore` module and helper tasks.
+Recovery is handled via the custom `wiseops_team.mneme.restore` module and helper tasks.
 Here is a complete, compact playbook to restore a specific table from a specific date:
 
 ```yaml
@@ -190,12 +206,12 @@ Here is a complete, compact playbook to restore a specific table from a specific
     # 2. Auto-discovery, Unarchiving & Preparation
     - name: Prepare Backup Artifacts
       ansible.builtin.include_role:
-        name: mneme
-        tasks_from: restore_prepare
+        name: wiseops_team.mneme.restore
+        tasks_from: prepare
 
     # 3. Restore (Sidecar strategy: zero downtime, specific table)
     - name: Restore Table
-      mneme_restore:
+      wiseops_team.mneme.restore:
         strategy: sidecar
         backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
         database: "{{ target_db }}"
@@ -204,15 +220,15 @@ Here is a complete, compact playbook to restore a specific table from a specific
     # 4. Cleanup workspace
     - name: Cleanup Temp Files
       ansible.builtin.include_role:
-        name: mneme
-        tasks_from: restore_cleanup
+        name: wiseops_team.mneme.restore
+        tasks_from: cleanup
 ```
 
 For detailed scenarios (Full Recovery, Point-in-Time, Direct Restore), see the **[Disaster Recovery Runbook](docs/RECOVERY_RUNBOOK.md)**.
 
 ## Observability & Monitoring
 
-Stop relying on email silence. This role treats backups as measurable metrics.
+Stop relying on email silence. This collection treats backups as measurable metrics.
 
 - **Prometheus (Recommended):** Generates `.prom` files for Node Exporter's Textfile Collector.
   - Metrics: `last_run_timestamp`, `last_status`, `duration_seconds`, `size_bytes`.

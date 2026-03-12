@@ -40,8 +40,8 @@
     # ------------------------------------------------------------------
     - name: "TEST 1 | Run restore_prepare helper (First Run)"
       ansible.builtin.include_role:
-        name: mneme
-        tasks_from: restore_prepare
+        name: wiseops_team.mneme.restore
+        tasks_from: prepare
       vars:
         mneme_restore_target_date: "{{ current_date }}"
 
@@ -63,8 +63,8 @@
     # ------------------------------------------------------------------
     - name: "TEST 2 | Run restore_prepare helper (Second Run)"
       ansible.builtin.include_role:
-        name: mneme
-        tasks_from: restore_prepare
+        name: wiseops_team.mneme.restore
+        tasks_from: prepare
       vars:
         mneme_restore_target_date: "{{ current_date }}"
 
@@ -89,7 +89,7 @@
         query: "DROP TABLE {{ db_name }}.{{ table_name }};"
 
     - name: "TEST 3 | Restore using prepared artifacts"
-      mneme_restore:
+      wiseops_team.mneme.restore:
         strategy: sidecar
         backup_dir: "{{ mneme_prepared_backup_dir }}"
         database: "{{ db_name }}"
@@ -109,8 +109,8 @@
     # ------------------------------------------------------------------
     - name: "TEST 4 | Run cleanup helper"
       ansible.builtin.include_role:
-        name: mneme
-        tasks_from: restore_cleanup
+        name: wiseops_team.mneme.restore
+        tasks_from: cleanup
       vars:
         mneme_restore_target_date: "{{ current_date }}"
 

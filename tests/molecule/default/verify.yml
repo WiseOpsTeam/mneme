@@ -133,7 +133,7 @@
   tasks:
     - name: "SETUP: Force apply cron with block_on_master=true"
       ansible.builtin.include_role:
-        name: mneme
+        name: wiseops_team.mneme.backup
         tasks_from: cron
       vars:
         mneme_backup_cron: true
@@ -231,7 +231,7 @@
 
     - name: "SETUP: Re-deploy scripts with NEW retention count"
       ansible.builtin.include_role:
-        name: mneme
+        name: wiseops_team.mneme.backup
         tasks_from: scripts
 
     - name: "ACT: Run daily backup to trigger rotation logic"
@@ -345,7 +345,7 @@
   tasks:
     - name: "SETUP | Enable Prometheus monitoring in scripts"
       ansible.builtin.include_role:
-        name: mneme
+        name: wiseops_team.mneme.backup
         tasks_from: scripts
       vars:
         mneme_prometheus_enabled: true
@@ -437,7 +437,7 @@
         mode: '0000'
 
     - name: "ACTION | Trigger Permission Error"
-      mneme_verify:
+      wiseops_team.mneme.verify:
         backup_dir: "/tmp/locked_backup_dir"
         database: "test_db"
         table: ["dummy_table"]

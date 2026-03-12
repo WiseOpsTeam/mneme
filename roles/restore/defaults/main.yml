@@ -1,0 +1,23 @@
+---
+# --- Restore & Recovery ---
+mneme_restore_target_date: "latest"
+mneme_restore_type: "daily"
+mneme_restore_work_dir: "{{ mneme_temp_dir }}/restore_{{ mneme_restore_target_date | default('unknown') }}"
+mneme_restore_prepare_timeout: 14400
+mneme_system_user: "mysql"
+mneme_system_group: "mysql"
+
+# --- Shared paths (duplicated from backup role for standalone usage) ---
+mneme_backup_dir: "/home/data/mneme_backups/backup"
+mneme_archive_dir: "/home/data/mneme_backups/archive"
+mneme_temp_dir: "/home/data/mneme_backups/tmp"
+mneme_data_dir: "/var/lib/mysql"
+
+# --- Binary paths ---
+mneme_bin_path: "/usr/bin/mariadb-backup"
+mneme_mariadb_bin_path: "/bin/mariadb"
+mneme_mariadb_dump_bin_path: "/bin/mariadb-dump"
+mneme_mysqld_bin_path: "/usr/sbin/mysqld"
+
+# --- Memory for prepare step ---
+mneme_use_memory: "1G"
