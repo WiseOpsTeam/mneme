@@ -65,8 +65,6 @@ provisioner:
     prepare: prepare.yml
     converge: converge.yml
     verify: verify.yml
-  env:
-    ANSIBLE_COLLECTIONS_PATH: "$HOME/.ansible/collections"
 verifier:
   name: ansible
 
