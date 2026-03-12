@@ -57,6 +57,11 @@ jobs:
       - name: Run ansible-lint
         run: ansible-lint .
 
+      - name: Build and install collection locally
+        run: |
+          ansible-galaxy collection build --force
+          ansible-galaxy collection install wiseops_team-mneme-*.tar.gz --force
+
       - name: Run molecule test (default)
         run: molecule test -s default
 
