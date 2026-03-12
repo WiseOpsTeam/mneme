@@ -1,7 +1,4 @@
 ---
 collections:
-  - name: wiseops_team.mneme
-    source: ../../../
-    type: dir
   - name: community.general
   - name: community.mysql

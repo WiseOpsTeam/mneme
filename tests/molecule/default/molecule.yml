@@ -65,10 +65,6 @@ provisioner:
     prepare: prepare.yml
     converge: converge.yml
     verify: verify.yml
-  env:
-    ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/library"
-    ANSIBLE_MODULE_UTILS: "${MOLECULE_PROJECT_DIRECTORY}/module_utils"
-
 verifier:
   name: ansible
 
