@@ -1,10 +1,10 @@
 ---
 namespace: wiseops_team
 name: mneme
-version: 1.0.0
+version: 2.1.0
 readme: README.md
 authors:
-  - Ivan Gumeniuk <IMHIO LTD>
+  - Ivan Gumeniuk <WiseOps>
 description: >-
   MySQL Native Ephemeral Management Engine (mneme).
   Production-grade backup, disaster recovery & verification for MariaDB
@@ -30,6 +30,7 @@ build_ignore:
   - molecule
   - .github
   - .gitignore
+  - .ansible
   - .yamllint
   - requirements.txt
   - "*.tar.gz"
