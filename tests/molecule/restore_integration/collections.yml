@@ -1,7 +1,7 @@
 ---
 collections:
   - name: wiseops_team.mneme
-    source: "{{ lookup('env', 'PWD') }}"
+    source: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}"
     type: dir
   - name: community.general
   - name: community.mysql
