@@ -50,22 +50,22 @@ This will configure a daily backup job at 9 AM server time, keeping the 5 most r
 
 ## Collection Structure
 
-The collection is organized into three roles:
+The collection is organized into five roles:
 
-| Role | Description |
-|:-----|:------------|
-| `wiseops_team.mneme.backup` | Installation, configuration, cron scheduling, retention, and monitoring. |
-| `wiseops_team.mneme.prepare` | Preparation of backup artifacts (unarchiving, permissions, `--prepare --export`). |
-| `wiseops_team.mneme.cleanup` | Removes temporary artifacts created by the prepare role. |
+| Role                         | Description                                                                                     |
+|:-----------------------------|:------------------------------------------------------------------------------------------------|
+| `wiseops_team.mneme.backup`  | Installation, configuration, cron scheduling, retention, and monitoring.                        |
+| `wiseops_team.mneme.prepare` | Preparation of backup artifacts (unarchiving, permissions, `--prepare --export`).               |
+| `wiseops_team.mneme.cleanup` | Removes temporary artifacts created by the prepare role.                                        |
 | `wiseops_team.mneme.recover` | Full recovery orchestrator: prepare → restore → cleanup. Use for sidecar and direct strategies. |
-| `wiseops_team.mneme.drill` | Automated backup verification drills using ephemeral restore. |
+| `wiseops_team.mneme.drill`   | Automated backup verification drills using ephemeral restore.                                   |
 
 And two custom modules:
 
-| Module | Description |
-|:-------|:------------|
+| Module                       | Description                                                                                  |
+|:-----------------------------|:---------------------------------------------------------------------------------------------|
 | `wiseops_team.mneme.restore` | Declarative recovery module supporting sidecar, direct, copy_back, and move_back strategies. |
-| `wiseops_team.mneme.verify` | Safe backup verification via ephemeral restore and validation query execution. |
+| `wiseops_team.mneme.verify`  | Safe backup verification via ephemeral restore and validation query execution.               |
 
 ## Capabilities
 
@@ -80,7 +80,11 @@ And two custom modules:
   - `sidecar`: Safe logical restore of specific tables using a temporary instance.
   - `direct`: Fast physical restore for large datasets using `DISCARD/IMPORT TABLESPACE`.
   - `copy_back`: Full instance disaster recovery (Standard).
-  - `move_back`: **Instant** full recovery for massive datasets (Moves files instead of copying, saving I/O and disk space).
+  - `move_back`: Full recovery for massive datasets (moves files instead of copying,
+    saving I/O and disk space). **Last resort only** — use when `copy_back` is not
+    feasible due to disk space or time constraints. See the
+    [Recovery Runbook](docs/RECOVERY_RUNBOOK.md#scenario-c2-extreme-speed--low-disk-space-move-back)
+    for important limitations.
 - **Partitioned Tables Support:** Fully automated restoration of partitioned InnoDB tables in `direct` mode. The module transparently handles the complex "Exchange Partition" workflow to bypass MariaDB's `DISCARD TABLESPACE` limitations.
 - Partial compatibility with similar utility Percona Xtrabackup. See below.
 - **Enterprise-Grade Restoration:**
@@ -100,12 +104,12 @@ And two custom modules:
 
 ## Basic Configuration
 
-| **Variable**                     | **Type** | **Default**                                       | **Description**                                                                                                                                          |
-|:---------------------------------|:---------|:--------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Variable**               | **Type** | **Default**                                       | **Description**                                                                                                                                          |
+|:---------------------------|:---------|:--------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `mneme_mysql_password`     | string   | Not defined                                       | Is not defined, so the role will fail without password being set (recommended to use Ansible Vault, Hashicorp Vault or another secure encrypted storage) |
-| `mneme_backup_dir`         | string   | `/home/data/mneme_backups/backup`           | Directory to store uncompressed backup files                                                                                                             |
-| `mneme_archive_dir`        | string   | `/home/data/mneme_backups/archive`          | Directory to store compressed backup archives                                                                                                            |
-| `mneme_retention_contours` | list     | complex list of dayly, weekly and monthly backups | Defines the backup schedule and retention policy. See [Retention Logic](docs/CONCEPTS.md#retention-logic) for a detailed explanation.                    |
+| `mneme_backup_dir`         | string   | `/home/data/mneme_backups/backup`                 | Directory to store uncompressed backup files                                                                                                             |
+| `mneme_archive_dir`        | string   | `/home/data/mneme_backups/archive`                | Directory to store compressed backup archives                                                                                                            |
+| `mneme_retention_contours` | list     | complex list of daily, weekly and monthly backups | Defines the backup schedule and retention policy. See [Retention Logic](docs/CONCEPTS.md#retention-logic) for a detailed explanation.                    |
 | `mneme_mailto_address`     | string   | `root@example.com`                                | Email address for cron job notifications                                                                                                                 |
 
 > A complete reference of all available variables can be found in **[docs/VARIABLES.md](docs/VARIABLES.md)**.
@@ -192,8 +196,8 @@ Refer to the **[Verification Guide](docs/VERIFICATION.md)** and the `wiseops_tea
 
 Recovery is handled via the custom `wiseops_team.mneme.restore` module and helper roles.
 
-For the common case, use the `recover` role — it handles the full
-cycle automatically:
+For the common case, use the `recover` role — it orchestrates prepare → restore → cleanup
+automatically:
 ```yaml
 - role: wiseops_team.mneme.recover
   vars:
@@ -203,45 +207,9 @@ cycle automatically:
     mneme_recover_table: [users]
 ```
 
-For advanced scenarios (async, copy_back, multi-play), use the
-components directly as shown below.
-
-Here is a complete, compact playbook to restore a specific table from a specific date:
-
-```yaml
----
-- name: Disaster Recovery - Restore Single Table
-  hosts: db_servers
-  become: true
-  vars:
-    # 1. Define the target
-    mneme_prepare_target_date: "2025-10-20"
-    target_db: "production_db"
-    target_table: "users"
-
-  tasks:
-    # 2. Auto-discovery, Unarchiving & Preparation
-    - name: Prepare Backup Artifacts
-      ansible.builtin.include_role:
-        name: wiseops_team.mneme.prepare
-
-    # 3. Restore (Sidecar strategy: zero downtime, specific table)
-    - name: Restore Table
-      wiseops_team.mneme.restore:
-        strategy: sidecar
-        backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-        database: "{{ target_db }}"
-        table: ["{{ target_table }}"]
-
-    # 4. Cleanup workspace
-    - name: Cleanup Temp Files
-      ansible.builtin.include_role:
-        name: wiseops_team.mneme.cleanup
-      vars:
-        mneme_prepare_target_date: "{{ mneme_prepare_target_date }}"
-```
-
-For detailed scenarios (Full Recovery, Point-in-Time, Direct Restore), see the **[Disaster Recovery Runbook](docs/RECOVERY_RUNBOOK.md)**.
+For advanced scenarios — full instance recovery, large databases requiring `async`/`poll`,
+or strategies that need MariaDB stopped between steps — see the
+**[Disaster Recovery Runbook](docs/RECOVERY_RUNBOOK.md)**.
 
 ## Observability & Monitoring
 

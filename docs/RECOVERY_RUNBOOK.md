@@ -1,326 +1,323 @@
-# Disaster Recovery Runbook: Restoring Backups
+# Disaster Recovery Runbook
 
-This document provides a consolidated guide for restoring MariaDB backups created by this Ansible role.
-Unlike legacy methods involving manual CLI scripts, restoration is now handled via the idempotent Ansible module `wiseops_team.mneme.restore`.
-
-## 1. Restoration Strategies
-
-The role supports four distinct restoration strategies covering different DRP scenarios.
-
-| Strategy      | Type     | Use Case                                                                                                                                                                          | Downtime?              |
-|:--------------|:---------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------|
-| **sidecar**   | Logical  | Restoring specific tables (`.ibd` + `mysqldump`). Safest method. Recommended for single tables or small batches.                                                                  | No                     |
-| **direct**    | Physical | Restoring heavy tables or whole databases. Uses `DISCARD`/`IMPORT TABLESPACE`. Fastest for large data.                                                                            | No*                    |
-| **copy_back** | Physical | Full Instance Recovery. Restoring the entire server from scratch.                                                                                                                 | **Yes** (Service Stop) |
-| **move_back** | Physical | Time-Critical Recovery. Best for huge DBs (>1TB) or low disk space. Destructive (empties backup dir). NOT ATOMIC. Power failure during this operation results in TOTAL DATA LOSS. | **Yes** (Service Stop) |
-> (*) **Note on Direct Restore:** While the server remains online, the specific tables being restored will be locked/unavailable during the `DISCARD`/`IMPORT` phase.
+This document is the operational guide for restoring MariaDB from backups created by the
+`wiseops_team.mneme` collection. Read section 0 before an incident occurs.
 
 ---
 
-## 2. Prerequisites & Automated Preparation
+## 0. Before an Incident: Prepare Now
 
-Before running any restore module, use the built-in prepare role.
-It automatically handles:
-1.  **Unarchiving** (using `pigz` if available).
-2.  **Permissions** (recursively sets ownership to `mysql` user).
-3.  **Preparation** (runs `mariabackup --prepare --export`).
-4.  **Idempotency** (skips if already done).
+The best time to test your recovery process is now, not during an outage.
 
-Add this task to the beginning of your playbook:
+**1. Run a drill.** Verify that your backups are valid and data restores correctly:
 
 ```yaml
-tasks:
-  - name: Prepare Backup Artifacts
-    ansible.builtin.include_role:
-      name: wiseops_team.mneme.prepare
-      tasks_from: prepare
-    vars:
-      # Optional: Date of the backup (YYYY-MM-DD) or the default 'latest' will be used
-      mneme_prepare_target_date: "2025-07-20"
-      # Optional: 'daily' (default), 'weekly', 'monthly'
-      mneme_prepare_type: "daily"
-
-  # The helper sets these facts for you:
-  # - mneme_prepared_backup_dir
-  # - mneme_prepared_schema_dir
+- role: wiseops_team.mneme.drill
+  vars:
+    mneme_verify_database: production_db
+    mneme_verify_random_tables_count: 5
 ```
+
+> The drill has zero impact on production data. It spins up an ephemeral MariaDB instance,
+> restores tables into a temporary database, runs validation queries, and cleans up after itself.
+
+**2. Keep ready-made playbooks in your repository.** Do not copy YAML from documentation
+during an incident — that is a source of errors under stress. Create the files now:
+
+```
+restore_table.yml      # Scenario A — lost a table
+restore_database.yml   # Scenario B — lost a database
+restore_full.yml       # Scenario C — full disaster recovery
+```
+
+**3. Add `async`/`poll` to all restore playbooks upfront if your database is larger than
+~100 GB.** See section 2 for details.
+
+---
+
+## 1. Choose Your Scenario
+
+Find your situation in the table and jump to the corresponding scenario.
+
+| What happened?                                  | Downtime?  | Strategy    | Scenario    |
+|:------------------------------------------------|:-----------|:------------|:------------|
+| A table or several tables were deleted          | Not needed | `sidecar`   | Scenario A  |
+| An entire database was dropped or corrupted     | Not needed | `direct`    | Scenario B  |
+| Full server crash, need to rebuild the instance | **Yes**    | `copy_back` | Scenario C  |
+| Same, but database > 500 GB or low disk space   | **Yes**    | `move_back` | Scenario C2 |
+
+---
+
+## 2. Critical: Large Databases and Timeouts
+
+> **Warning:** If your database exceeds ~100 GB, the restore operation will take longer than
+> a typical SSH session timeout. If the connection drops mid-operation, MariaDB will be left
+> in a corrupted state.
+
+Use `async`/`poll` for all heavy restore operations. Ready-made template:
+
+```yaml
+- name: Restore (async — safe for large databases)
+  wiseops_team.mneme.restore:
+    strategy: "{{ strategy }}"
+    backup_dir: "{{ mneme_prepared_backup_dir }}"
+    # ... other parameters
+  async: 28800   # maximum allowed runtime in seconds (8 hours)
+  poll: 60       # check status every 60 seconds
+  register: restore_job
+
+- name: Wait for restore to complete
+  ansible.builtin.async_status:
+    jid: "{{ restore_job.ansible_job_id }}"
+  register: job_result
+  until: job_result.finished
+  retries: 500
+  delay: 60
+```
+
+All examples in the scenarios below use synchronous calls for brevity. For large databases,
+replace the `wiseops_team.mneme.restore` task with the template above.
 
 ---
 
 ## 3. Scenarios
 
-### ⚠️ Critical Considerations for Direct Strategy
+Scenarios A and B use the `recover` role — it orchestrates prepare → restore → cleanup
+automatically. Scenarios C and C2 require MariaDB to be stopped before restore, so they use
+the components directly.
 
-The `direct` strategy uses the physical `DISCARD/IMPORT TABLESPACE` method. While extremely fast, it has significant operational side effects:
+---
 
-#### 1. Replication Desynchronization
-The module forces `SET SESSION sql_log_bin=0` to import tablespaces safely.
-- **Impact:** The restored data **will not** replicate to slaves. The Master will have the data, but Slaves will be unaware of it.
-- **Action Required:** You **must rebuild all replicas (slaves)** immediately after a direct restore.
-
-#### 2. Referential Integrity (Foreign Keys)
-MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
-- **Impact:** It is possible to restore a child table without its parent. The database will not stop you, but the data may be logically inconsistent.
-- **Action Required:** Manually verify data integrity after restore.
-  Example check:
-  ```sql
-  -- Find orphaned rows
-  SELECT child.id FROM child_table child
-  LEFT JOIN parent_table parent ON child.parent_id = parent.id
-  WHERE parent.id IS NULL;
-  ```
-  
 ### Scenario A: "Oops, I deleted a table" (Single Table Restore)
 
-**Strategy:** `sidecar` (Logical)
-**Method:** Spins up a temporary `mysqld` instance on the backup files and streams data to the live server.
+**Strategy: `sidecar` — logical restore.**
+Spins up a temporary `mysqld` on the backup files, dumps the requested tables, and imports
+them into production. MariaDB stays online. Zero downtime.
+
+> To restore several tables, list them all under `mneme_recover_table`.
 
 ```yaml
-- name: Prepare Backup Artifacts
-  ansible.builtin.include_role:
-    name: wiseops_team.mneme.prepare
-    tasks_from: prepare
-  vars:
-    mneme_prepare_target_date: "latest"
-    
-- name: Restore 'users' table safely
-  wiseops_team.mneme.restore:
-    strategy: sidecar
-    backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-    database: "very_important_database"
-    table: 
-      - "users"
-    # Binaries (from role defaults)
-    client_bin: "{{ mneme_mariadb_bin_path }}"
-    dump_bin: "{{ mneme_mariadb_dump_bin_path }}"
-    mysqld_bin: "{{ mneme_mysqld_bin_path }}"
-    login_config: /root/.my.cnf
+---
+- name: "Scenario A: Restore deleted table"
+  hosts: db_servers
+  become: true
+
+  roles:
+    - role: wiseops_team.mneme.recover
+      vars:
+        mneme_recover_strategy: sidecar
+        mneme_recover_target_date: "2026-03-15"  # or "latest"
+        mneme_recover_database: production_db
+        mneme_recover_table:
+          - users
+
+  post_tasks:
+    - name: Verify restored data
+      community.mysql.mysql_query:
+        query: "SELECT count(*) FROM production_db.users"
+      register: check
+      failed_when: check.query_result[0][0]["count(*)"] == 0
 ```
+
+---
 
 ### Scenario B: "I dropped the whole client database" (Bulk Restore)
 
-**Strategy:** `direct` (Physical + Auto-Discovery)
-**Method:** If `table` is omitted, the module scans the backup directory for all `.ibd` files in the database folder and restores them one by one via `IMPORT TABLESPACE`.
+**Strategy: `direct` — physical DISCARD/IMPORT TABLESPACE.**
+MariaDB stays online, but the tables being restored are unavailable during the import phase.
+Faster than `sidecar` for large datasets. If the tables were dropped, `schema_file` is required.
+
+> **Warning: `direct` breaks replication.** The module sets `SET SESSION sql_log_bin=0` so
+> the restored data does not replicate to replicas. You must rebuild all replicas immediately
+> after the operation completes.
+
+> **Note on foreign keys:** MariaDB disables `FOREIGN_KEY_CHECKS` during `IMPORT TABLESPACE`.
+> It is possible to restore a child table without its parent without getting an error. Always
+> verify referential integrity after a direct restore.
 
 ```yaml
-- name: Prepare Backup Artifacts
-  ansible.builtin.include_role:
-    name: wiseops_team.mneme.prepare
-    tasks_from: prepare
-  vars:
-    mneme_prepare_target_date: "latest"
-    
-- name: Restore entire database (Auto-Discovery)
-  wiseops_team.mneme.restore:
-    strategy: direct
-    backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-    database: "very_important_database"
-    # table: <omitted> -> triggers auto-discovery of all tables
-    
-    # Schema is required to re-create tables if they were dropped
-    schema_file: "{{ mneme_prepared_schema_dir }}/very_important_database_schema.sql"    
-    force: true # Required for Direct strategy
-    
-    client_bin: "{{ mneme_mariadb_bin_path }}"
-    login_config: /root/.my.cnf
+---
+- name: "Scenario B: Restore dropped database"
+  hosts: db_servers
+  become: true
+
+  roles:
+    - role: wiseops_team.mneme.recover
+      vars:
+        mneme_recover_strategy: direct
+        mneme_recover_target_date: "latest"
+        mneme_recover_database: production_db
+        mneme_recover_force: true
+        # schema_file is required if tables were dropped:
+        # mneme_recover_schema_file: >-
+        #   {{ mneme_prepared_backup_dir }}/../mneme_schema_daily_{{ mneme_recover_target_date }}
+        #   /production_db_schema.sql
+
+  post_tasks:
+    - name: Verify row counts
+      community.mysql.mysql_query:
+        query: >
+          SELECT table_name, table_rows
+          FROM information_schema.tables
+          WHERE table_schema = "production_db"
+      register: tables
+
+    - name: Verify foreign key integrity
+      community.mysql.mysql_query:
+        query: >
+          SELECT child.id FROM orders child
+          LEFT JOIN users parent ON child.user_id = parent.id
+          WHERE parent.id IS NULL LIMIT 1
+      register: fk_check
+      failed_when: fk_check.query_result | length > 0
 ```
+
+---
 
 ### Scenario C: "Server Crash / Disaster Recovery" (Full Instance)
 
-**Strategy:** `copy_back`
-**Method:** Stops the server, wipes `datadir`, and moves backup files into place.
+**Strategy: `copy_back` — physical file copy.**
+Stops MariaDB, wipes `datadir`, and copies backup files into place. The `recover` role does
+not support this scenario because MariaDB must be stopped between `prepare` and `restore`.
+Use the components directly.
+
+> **Database > 500 GB or low disk space?** Use Scenario C2 (`move_back`) — it moves files
+> instead of copying, saving both time and disk space.
 
 ```yaml
-- name: FULL RESTORE (COPY-BACK)
+---
+- name: "Scenario C: Full instance disaster recovery"
+  hosts: db_servers
+  become: true
   vars:
     mneme_prepare_target_date: "latest"
-  block:
+
+  tasks:
     - name: Stop MariaDB
-      ansible.builtin.service: name=mariadb state=stopped
+      ansible.builtin.service:
+        name: mariadb
+        state: stopped
 
     - name: Wipe current data directory
       ansible.builtin.file:
         path: /var/lib/mysql
         state: absent
 
-    - name: Recreate datadir
-      ansible.builtin.file: 
-        path: /var/lib/mysql 
-        state: directory 
-        owner: mysql 
-        group: mysql
-        mode: '0755'
-        
-    - name: Prepare Backup Artifacts
-      ansible.builtin.include_role:
-        name: wiseops_team.mneme.prepare
-        tasks_from: prepare
-        
-    - name: Copy-Back Backup files
-      wiseops_team.mneme.restore:
-      strategy: copy_back
-      backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-      datadir: /var/lib/mysql
-      mneme_bin: "{{ mneme_bin_path }}"
-      force: true
-
-    - name: Start MariaDB
-      ansible.builtin.service: name=mariadb state=started
-```
-### Scenario D: "Extreme Speed / Low Disk Space" (Move-Back)
-
-**Strategy:** `move_back`
-**Use Case:** Your database is 2TB, and you only have 500GB free space left, OR you need to restore ASAP and cannot wait for file copying.
-**Warning:** ⚠️ **DESTRUCTIVE OPERATION.** This strategy **moves** files from the backup directory to the data directory. The backup directory will be empty after the operation.
-
-```yaml
-- name: FULL RESTORE (MOVE-BACK)
-  vars:
-    mneme_prepare_target_date: "latest"
-  block:
-    - name: Stop MariaDB
-      ansible.builtin.service: name=mariadb state=stopped
-
-    - name: Wipe current data directory
+    - name: Recreate empty data directory
       ansible.builtin.file:
         path: /var/lib/mysql
-        state: absent
-
-    - name: Recreate datadir
-      ansible.builtin.file: 
-        path: /var/lib/mysql 
-        state: directory 
-        owner: mysql 
+        state: directory
+        owner: mysql
         group: mysql
-        mode: '0755'
-        
-    - name: Prepare Backup Artifacts
+        mode: "0755"
+
+    - name: Prepare backup artifacts
       ansible.builtin.include_role:
         name: wiseops_team.mneme.prepare
-        tasks_from: prepare
-        
-    - name: Move-Back Backup files (Almost instant on same FS)
+
+    - name: Copy back backup files
       wiseops_team.mneme.restore:
-      strategy: move_back
-      backup_dir: "{{ mneme_prepared_backup_dir }}" # Fact from prepare step
-      datadir: /var/lib/mysql
-      mneme_bin: "{{ mneme_bin_path }}"
-      force: true
+        strategy: copy_back
+        backup_dir: "{{ mneme_prepared_backup_dir }}"
+        datadir: /var/lib/mysql
+        mneme_bin: "{{ mneme_bin_path }}"
+        force: true
 
     - name: Start MariaDB
-      ansible.builtin.service: name=mariadb state=started
-```
+      ansible.builtin.service:
+        name: mariadb
+        state: started
 
-### Scenario E: Automatic Restoration (Auto-Discovery)
-
-To restore the absolute latest available state without specifying a date manually, use `latest`.
-The role implements a **Safe Discovery Strategy**:
-
-1.  **Scoped:** Respects `mneme_prepare_type`. If you request `daily`, it ignores newer `weekly` backups to prevent logical mismatches.
-2.  **Atomic Safety:** Prioritizes completed backups with verified `.sha256` markers. It effectively protects against Race Conditions (e.g., attempting to restore while a new backup is still being written).
-3.  **Fallback:** If checksum generation is disabled, it falls back to the newest raw `.tar.gz` file (with a warning).
-
-
-## 4. Handling Large Datasets (Timeouts)
-
-**⚠️ CRITICAL FOR LARGE DATABASES (>500GB)**
-
-If your restoration process takes longer than your SSH session timeout (usually 1 hour), the Ansible connection will be dropped by firewalls or network equipment because the module "hangs" while waiting for the restore to complete.
-**Result:** The restore process on the server will be terminated abruptly, leaving the database in a corrupted state.
-
-To prevent this, you **MUST** use Ansible's native asynchronous mode (`async` and `poll`).
-
-### Example: Asynchronous Restore (Safe for Long Operations)
-
-```yaml
-- name: FULL DISASTER RECOVERY (Async Mode)
-  wiseops_team.mneme.restore:
-    strategy: copy_back
-    # Use the fact generated by the prepare task
-    backup_dir: "{{ mneme_prepared_backup_dir }}"
-    datadir: /var/lib/mysql
-    mneme_bin: "{{ mneme_bin_path }}"
-    force: true
-    # Fire-and-forget logic to survive SSH timeouts:
-    async: 28800  # Maximum allowed runtime in seconds (e.g., 8 hours)
-    poll: 60      # Check status every 60 seconds
-    register: restore_job
-
-- name: Check Restore Status
-  async_status:
-    jid: "{{ restore_job.ansible_job_id }}"
-  register: job_result
-  until: job_result.finished
-  retries: 500  # (Optional) Usually 'poll' handles the waiting, but this is for extra safety loops
-  delay: 10
-```
-
----
-
-## 4. Module Reference
-
-### Common Arguments
-
-| Argument     | Type | Description                                                             |
-|--------------|------|-------------------------------------------------------------------------|
-| `backup_dir` | path | **Required.** Path to the *unarchived* and *prepared* backup directory. |
-| `strategy`   | str  | `sidecar` (default), `direct`, or `copy_back`/`move_back`.              |
-| `temp_dir`   | path | Directory for temp sockets/files. Defaults to `/tmp`.                   |
-| `force`      | bool | Required for `direct` and `copy_back`. Allows overwriting data.         |
-
-### Binary Paths (Important)
-
-To ensure the module uses the correct binaries defined in your role variables, always map these arguments:
-
-```yaml
-client_bin: "{{ mneme_mariadb_bin_path }}"       # /bin/mariadb
-dump_bin: "{{ mneme_mariadb_dump_bin_path }}"    # /bin/mariadb-dump
-mysqld_bin: "{{ mneme_mysqld_bin_path }}"        # /usr/sbin/mysqld (Needed for Sidecar)
-mneme_bin: "{{ mneme_bin_path }}"          # /usr/bin/mariadb-backup (Needed for Copy-Back)
-
-```
-
-### Strategy-Specific Arguments
-
-| Strategy                     | Argument      | Description                                                            |
-|------------------------------|---------------|------------------------------------------------------------------------|
-| **sidecar**                  | `database`    | Target database name.                                                  |
-|                              | `table`       | List of tables to restore.                                             |
-| **direct**                   | `database`    | Target database name.                                                  |
-|                              | `table`       | List of tables. If empty, restores ALL found `.ibd` files.             |
-|                              | `schema_file` | Path to `.sql` schema dump. Required if tables do not exist in the DB. |
-| **copy_back**/ **move_back** | `datadir`     | Target data directory (e.g. `/var/lib/mysql`).                         |
-
----
-
-## 5. Post-Restore Cleanup
-
-To remove the temporary unarchived data and save disk space, use the `restore_cleanup` helper at the end of your playbook.
-
-```yaml
   post_tasks:
-    - name: Cleanup Restore Artifacts
+    - name: Verify MariaDB is healthy
+      community.mysql.mysql_query:
+        query: "SELECT 1"
+
+    - name: Cleanup restore artifacts
       ansible.builtin.include_role:
         name: wiseops_team.mneme.cleanup
       vars:
-        # Must match the date used in preparation
-        mneme_prepare_target_date: "2025-07-20"
+        mneme_prepare_target_date: "{{ mneme_prepare_target_date }}"
 ```
 
-## 6. Troubleshooting
+---
 
-**Error: `Sidecar mysqld failed to start`**
+### Scenario C2: "Extreme Speed / Low Disk Space" (Move-Back)
 
-* **Check Permissions:** Does the `mysql` user have read access to `backup_dir`? (See Step 1).
-* **Check AppArmor/SELinux:** Is the system blocking `mysqld` from reading files in `/home/data`?
-* **Check Logs:** The module output will contain the stderr from the failed process.
+**Strategy: `move_back` — moves files instead of copying.**
+Use this when your database exceeds ~500 GB or when you do not have enough free disk space
+for a full copy. The playbook structure is identical to Scenario C — only the `strategy`
+parameter changes.
 
-**Error: `Insufficient disk space`**
+> **Destructive operation:** After `move_back` the backup directory will be empty. If the
+> operation is interrupted by a power failure or disk error, data will be lost permanently.
+> Ensure a stable environment before running.
 
-* The module checks for free space (required space * 1.1) before starting `direct` or `copy_back`.
-* Clean up old artifacts or increase volume size.
+> Last resort only. Use move_back only when copy_back is physically impossible — insufficient disk space or a hard time constraint. Once the operation starts, there is no rollback: files are moved one by one, and an interruption at any point leaves you with neither a valid backup nor a working instance.
+> Before running: confirm the backup directory is on the same filesystem as datadir (otherwise move degrades to copy anyway), ensure UPS or equivalent power stability, and make sure no other process can touch the backup directory during the operation.
 
-**Error: `Table ... missing and no schema file provided`**
+```yaml
+    # The only change from Scenario C:
+    - name: Move back backup files
+      wiseops_team.mneme.restore:
+        strategy: move_back        # <-- was copy_back
+        backup_dir: "{{ mneme_prepared_backup_dir }}"
+        datadir: /var/lib/mysql
+        mneme_bin: "{{ mneme_bin_path }}"
+        force: true
+```
 
-* In `direct` strategy, if you are restoring a table that was `DROP`ped, you **must** provide `schema_file`. The module needs the `CREATE TABLE` statement to recreate the tablespace structure before importing the `.ibd` file.
+All other steps (stop MariaDB, wipe datadir, prepare, start, verify, cleanup) are identical
+to Scenario C.
 
+---
+
+## 4. Reference
+
+### Recovery Strategies
+
+| Strategy | Type | Downtime | When to use |
+|:---|:---|:---|:---|
+| `sidecar` | Logical | No | Restoring specific tables. Safest method. |
+| `direct` | Physical | No* | Restoring a whole database. Faster for large datasets. |
+| `copy_back` | Physical | **Yes** | Full DR. Copies backup files into datadir. |
+| `move_back` | Physical | **Yes** | Full DR. Moves files — faster and space-efficient, but destructive. |
+
+*\* `direct`: server stays online, but the tables being restored are locked during DISCARD/IMPORT.*
+
+---
+
+### `wiseops_team.mneme.restore` Module Arguments
+
+| Argument | Type | Strategies | Description |
+|:---|:---|:---|:---|
+| `backup_dir` | path | all | **Required.** Path to the unpacked and prepared backup. |
+| `strategy` | str | all | `sidecar` (default), `direct`, `copy_back`, `move_back`. |
+| `database` | str | sidecar, direct | Target database name. Required for these strategies. |
+| `table` | list | sidecar, direct | List of tables. If omitted, all `.ibd` files are auto-discovered. |
+| `schema_file` | path | direct | Path to a `.sql` schema dump. Required if tables were dropped. |
+| `datadir` | path | copy/move_back | Target data directory. Default: `/var/lib/mysql`. |
+| `force` | bool | direct, copy/move_back | Required for `direct`, `copy_back`, and `move_back`. |
+| `temp_dir` | path | all | Directory for sockets and temp files. Default: `/tmp`. |
+| `login_config` | path | all | Path to `.my.cnf`. Default: `/root/.my.cnf`. |
+
+---
+
+### `prepare` Role Variables
+
+| Variable | Default | Description |
+|:---|:---|:---|
+| `mneme_prepare_target_date` | `latest` | Backup date (`YYYY-MM-DD`) or `"latest"`. |
+| `mneme_prepare_type` | `daily` | Backup contour: `daily`, `weekly`, or `monthly`. |
+| `mneme_prepare_timeout` | `14400` | Timeout for `mariabackup --prepare`, in seconds. |
+| `mneme_prepare_work_dir` | see defaults | Working directory. Set automatically at runtime. |
+
+---
+
+### Facts Set by the `prepare` Role
+
+| Fact | Description |
+|:---|:---|
+| `mneme_prepared_backup_dir` | Path to the unpacked and prepared backup. Pass this to `restore`. |
+| `mneme_prepared_schema_dir` | Path to the schema dump directory. Use as `schema_file` source in `direct`. |
+| `mneme_prepared_runtime_work_dir` | Working directory. Passed to `cleanup` automatically when `prepare` and `cleanup` run in the same play. |
