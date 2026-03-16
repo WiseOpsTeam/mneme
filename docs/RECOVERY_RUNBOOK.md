@@ -301,8 +301,7 @@ To remove the temporary unarchived data and save disk space, use the `restore_cl
   post_tasks:
     - name: Cleanup Restore Artifacts
       ansible.builtin.include_role:
-        name: wiseops_team.mneme.prepare
-        tasks_from: cleanup
+        name: wiseops_team.mneme.cleanup
       vars:
         # Must match the date used in preparation
         mneme_prepare_target_date: "2025-07-20"

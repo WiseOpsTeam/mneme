@@ -3,7 +3,6 @@
 - name: Prepare backup artifacts for verification
   ansible.builtin.include_role:
     name: wiseops_team.mneme.prepare
-    tasks_from: prepare
   vars:
     mneme_prepare_target_date: "{{ mneme_verify_target_date }}"
     mneme_prepare_type: "{{ mneme_verify_type }}"
@@ -21,7 +20,6 @@
 
 - name: Cleanup verification artifacts
   ansible.builtin.include_role:
-    name: wiseops_team.mneme.prepare
-    tasks_from: cleanup
+    name: wiseops_team.mneme.cleanup
   vars:
     mneme_prepare_target_date: "{{ mneme_verify_target_date }}"

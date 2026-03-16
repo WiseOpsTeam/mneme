@@ -109,8 +109,7 @@
     # ------------------------------------------------------------------
     - name: "TEST 4 | Run cleanup helper"
       ansible.builtin.include_role:
-        name: wiseops_team.mneme.prepare
-        tasks_from: cleanup
+        name: wiseops_team.mneme.cleanup
       vars:
         mneme_prepare_target_date: "{{ current_date }}"
 
