@@ -1,0 +1,67 @@
+---
+# Handle script deployment
+
+- name: Ensure lib directory exists
+  ansible.builtin.file:
+    path: /usr/local/lib/mneme
+    state: directory
+    owner: "{{ mneme_backup_script_owner }}"
+    group: "{{ mneme_backup_script_group }}"
+    mode: '0755'
+  register: lib_dir_result
+  failed_when: lib_dir_result is failed
+  ignore_errors: false
+
+- name: Deploy retention library script
+  ansible.builtin.template:
+    src: lib/retention.sh.j2
+    dest: /usr/local/lib/mneme/retention.sh
+    owner: "{{ mneme_backup_script_owner }}"
+    group: "{{ mneme_backup_script_group }}"
+    mode: "{{ mneme_backup_script_mode }}"
+  register: retention_script_result
+  failed_when: retention_script_result is failed
+  ignore_errors: false
+
+- name: Deploy monitoring library script
+  ansible.builtin.template:
+    src: lib/monitoring.sh.j2
+    dest: /usr/local/lib/mneme/monitoring.sh
+    owner: "{{ mneme_backup_script_owner }}"
+    group: "{{ mneme_backup_script_group }}"
+    mode: "{{ mneme_backup_script_mode }}"
+  register: monitoring_script_result
+  failed_when: monitoring_script_result is failed
+  ignore_errors: false
+
+- name: Deploy replication library script
+  ansible.builtin.template:
+    src: lib/replication.sh.j2
+    dest: /usr/local/lib/mneme/replication.sh
+    owner: "{{ mneme_backup_script_owner }}"
+    group: "{{ mneme_backup_script_group }}"
+    mode: "{{ mneme_backup_script_mode }}"
+  register: replication_script_result
+  failed_when: replication_script_result is failed
+  ignore_errors: false
+
+- name: Deploy prometheus library script
+  ansible.builtin.template:
+    src: lib/prometheus.sh.j2
+    dest: /usr/local/lib/mneme/prometheus.sh
+    owner: "{{ mneme_backup_script_owner }}"
+    group: "{{ mneme_backup_script_group }}"
+    mode: "{{ mneme_backup_script_mode }}"
+  register: prometheus_script_result
+  failed_when: prometheus_script_result is failed
+
+- name: Deploy backup wrapper script
+  ansible.builtin.template:
+    src: backup_wrapper.sh.j2
+    dest: /usr/local/bin/mneme_wrapper.sh
+    owner: "{{ mneme_backup_script_owner }}"
+    group: "{{ mneme_backup_script_group }}"
+    mode: "{{ mneme_backup_script_mode }}"
+  register: wrapper_script_result
+  failed_when: wrapper_script_result is failed
+  ignore_errors: false

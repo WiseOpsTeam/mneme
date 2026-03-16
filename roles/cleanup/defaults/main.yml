@@ -1,0 +1,7 @@
+---
+# --- Cleanup configuration ---
+mneme_prepare_target_date: "latest"
+mneme_prepare_work_dir: "{{ mneme_temp_dir }}/restore_{{ mneme_prepare_target_date | default('unknown') }}"
+
+# --- Shared paths (needed to resolve mneme_prepare_work_dir default) ---
+mneme_temp_dir: "/home/data/mneme_backups/tmp"

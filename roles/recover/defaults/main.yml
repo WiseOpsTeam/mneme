@@ -1,0 +1,24 @@
+---
+# --- Recovery target ---
+mneme_recover_target_date: "latest"
+mneme_recover_type: "daily"
+
+# --- Restore module parameters ---
+mneme_recover_strategy: "sidecar"
+mneme_recover_database: ""
+mneme_recover_table: []
+mneme_recover_schema_file: ""
+mneme_recover_datadir: "/var/lib/mysql"
+mneme_recover_force: false
+mneme_recover_skip_cleanup: false
+
+# --- Shared paths (duplicated from backup role for standalone usage) ---
+mneme_backup_dir: "/home/data/mneme_backups/backup"
+mneme_archive_dir: "/home/data/mneme_backups/archive"
+mneme_temp_dir: "/home/data/mneme_backups/tmp"
+
+# --- Binary paths ---
+mneme_bin_path: "/usr/bin/mariadb-backup"
+mneme_mariadb_bin_path: "/bin/mariadb"
+mneme_mariadb_dump_bin_path: "/bin/mariadb-dump"
+mneme_mysqld_bin_path: "/usr/sbin/mysqld"

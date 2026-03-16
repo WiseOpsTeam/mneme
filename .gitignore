@@ -9,3 +9,6 @@ debug.yml
 .venv
 venv
 .secure_files
+__pycache__/
+*.tar.gz
+.idea/

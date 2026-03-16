@@ -1,0 +1,90 @@
+#!/bin/bash
+{% raw %}
+# Retention management functions for mariabackup
+
+manage_retention() {
+    local contour_type="$1"
+    local contour_count="$2"
+    local backup_prefix_to_match="$3"
+
+    log "Managing retention for '${backup_prefix_to_match}*'. Keeping the latest ${contour_count}."
+
+    if ! [[ "$contour_count" =~ ^[0-9]+$ ]]; then
+        log "ERROR: Invalid retention count '${contour_count}' for contour '${contour_type}'. Must be a non-negative integer."
+        fail_and_exit
+    fi
+
+    # Regex to strictly match the backup file format
+    local regex_pattern="${ARCHIVE_DIR}/${backup_prefix_to_match}[0-9]{4}-[0-9]{2}-[0-9]{2}\.tar\.gz"
+
+    if [ "$contour_count" -eq 0 ]; then
+        log "Retention count is 0. Deleting all backups matching the pattern."
+        find "${ARCHIVE_DIR}" -maxdepth 1 -type f -regextype posix-extended -regex "${regex_pattern}" -print -delete
+        find "${ARCHIVE_DIR}" -maxdepth 1 -type f -regextype posix-extended -regex "${regex_pattern}\.sha256" -print -delete
+        log "Deletion completed."
+        return
+    fi
+
+    # Sort files from newest to oldest based on the date in the filename
+    mapfile -t backups_sorted < <(find "${ARCHIVE_DIR}" -maxdepth 1 -type f -regextype posix-extended -regex "${regex_pattern}" | sort -r)
+
+    local total_backups=${#backups_sorted[@]}
+    log "Found ${total_backups} valid backups."
+
+    if [ "${total_backups}" -le "${contour_count}" ]; then
+        log "Number of backups is within the retention limit. Nothing to delete."
+        return
+    fi
+
+    # Identify backups to delete
+    local num_to_delete=$((total_backups - contour_count))
+    log "Will delete ${num_to_delete} oldest backup(s)."
+    mapfile -t backups_to_delete < <(printf "%s\n" "${backups_sorted[@]}" | tail -n "${num_to_delete}")
+
+    # Delete the outdated backups
+    for old_backup in "${backups_to_delete[@]}"; do
+        log "Deleting outdated backup: ${old_backup}"
+        rm -f "${old_backup}" || log "ERROR: Failed to delete: ${old_backup}"
+        rm -f "${old_backup}.sha256" || log "ERROR: Failed to delete checksum: ${old_backup}.sha256"
+    done
+
+    log "Retention management for '${backup_prefix_to_match}*' completed."
+}
+
+# shellcheck disable=SC2154
+# SC2154 - CONTOUR_TYPE is referenced but not assigned.
+# This is a false positive because this script is sourced by backup_wrapper.sh,
+# which sets the variable before calling this function.
+manage_retention_contours() {
+    local CONTOUR_TYPE="$1"
+    # Using a lock file to prevent race conditions if multiple retention scripts run simultaneously
+    (
+        flock -x 200 || { log "ERROR: Failed to acquire lock. Another retention process may be running."; exit 1; }
+
+        local contour_count=-1
+{% endraw %}
+        {% for contour in mneme_retention_contours %}
+        if [ "{{ contour.type }}" = "$CONTOUR_TYPE" ]; then
+            contour_count={{ contour.count }}
+        fi
+        {% endfor %}
+{% raw %}
+        if [ "$contour_count" -eq -1 ]; then
+            log "ERROR: No retention count configured for contour type: $CONTOUR_TYPE"
+            fail_and_exit
+        fi
+
+        # Manage retention for data backups
+        manage_retention "$CONTOUR_TYPE" "$contour_count" "mneme_${CONTOUR_TYPE}_"
+
+{% endraw %}
+        # Manage retention for schema backups if they are enabled
+        {% if mneme_databases_schemes_include | length > 0 %}
+{% raw %}
+        manage_retention "$CONTOUR_TYPE" "$contour_count" "mneme_schema_${CONTOUR_TYPE}_"
+{% endraw %}
+        {% endif %}
+{% raw %}
+    ) 200>/var/lock/.mneme_retention.lock
+}
+{% endraw %}

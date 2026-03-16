@@ -7,7 +7,7 @@
 | `mneme_temp_dir`           | string   | `/home/data/mneme_backups/tmp`                    | Temporary directory used during backup process                                            |
 | `mneme_log_dir`            | string   | `/var/log/mariabackup`                            | Directory to store backup logs                                                            |
 | `mneme_data_dir`           | string   | `/var/lib/mysql`                                  | Database location                                                                         |
-| `mneme_retention_contours` | list     | complex list of dayly, weekly and monthly backups | The cronjobs and the retention policy are set in this variable. See in description below. |
+| `mneme_retention_contours` | list     | complex list of daily, weekly and monthly backups | The cronjobs and the retention policy are set in this variable. See in description below. |
 | `mneme_backup_cron`        | bool     | `true`                                            | Trigger activating the cronjob of regular backup                                          |
 | `mneme_mailto_address`     | string   | `root@example.com`                                | Email address for cron job notifications                                                  |
 
@@ -117,14 +117,14 @@
 |:---------------------------------------|:---------|:------------|:-----------------------------------------------------------------|
 | `mneme_xtrabackup_compatibility` | bool     | false       | If true, the role skips the installation of mariabackup package. |
 
-### Restore & Recovery Configuration
+### Restore & Recovery Configuration (`wiseops_team.mneme.prepare` role)
 
-These variables are used by `tasks_from: restore_prepare` helper.
+These variables are used by the `wiseops_team.mneme.prepare` role.
 
 | **Variable**                          | **Default**                                     | **Description**                                                                                                                       |
 |:--------------------------------------|:------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------|
-| `mneme_restore_target_date`     | `latest`                                        | The date of the backup to restore (Format: `YYYY-MM-DD`). Must be provided at runtime otherwise the latest valid backup will be used. |
-| `mneme_restore_type`            | `daily`                                         | The retention contour type to look for (`daily`, `weekly`, `monthly`).                                                                |
-| `mneme_restore_work_dir`        | `{{ mneme_temp_dir }}/restore_{{ date }}` | Directory where the backup will be unarchived. Can be overridden if you need to use a different disk partition.                       |
-| `mneme_restore_prepare_timeout` | `14400`                                         | Timeout in seconds for the `mariadb-backup --prepare` step (default: 4 hours).                                                        |
+| `mneme_prepare_target_date`     | `latest`                                        | The date of the backup to restore (Format: `YYYY-MM-DD`). Must be provided at runtime otherwise the latest valid backup will be used. |
+| `mneme_prepare_type`            | `daily`                                         | The retention contour type to look for (`daily`, `weekly`, `monthly`).                                                                |
+| `mneme_prepare_work_dir`        | `{{ mneme_temp_dir }}/restore_{{ date }}` | Directory where the backup will be unarchived. Can be overridden if you need to use a different disk partition.                       |
+| `mneme_prepare_timeout` | `14400`                                         | Timeout in seconds for the `mariadb-backup --prepare` step (default: 4 hours).                                                        |
 | `mneme_system_user`             | `mysql`                                         | System user that owns the database files. Crucial for permission fixing during restore.                                               |

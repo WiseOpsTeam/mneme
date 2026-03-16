@@ -1,3 +1,5 @@
+---
+
 name: CI
 
 on:
@@ -19,6 +21,7 @@ on:
 env:
   ANSIBLE_ROLES_PATH: ${{ github.workspace }}/..
   ANSIBLE_FORCE_COLOR: '1'
+  MOLECULE_GLOB: 'tests/molecule/*/molecule.yml'
 
 jobs:
   lint_and_test:
@@ -48,9 +51,28 @@ jobs:
       - name: Install Ansible Collections
         run: ansible-galaxy collection install community.general community.mysql
 
+      - name: Run yamllint
+        run: yamllint .
+
       - name: Run ansible-lint
+        run: ansible-lint .
+
+      - name: Build and install collection locally
         run: |
-          ansible-lint .
+          ansible-galaxy collection build --force
+          ansible-galaxy collection install wiseops_team-mneme-*.tar.gz --force -p ~/.ansible/collections
+
+      - name: Debug collection install path
+        run: |
+          echo "=== HOME ==="
+          echo $HOME
+          echo "=== find collections ==="
+          find ~/.ansible/collections -type f -name "*.py" | grep -E "(verify|restore)" | head -20
+          echo "=== tree collections ==="
+          tree ~/.ansible/collections/ansible_collections/wiseops_team/ 2>/dev/null || find ~/.ansible/collections/ansible_collections/wiseops_team/ -type f | sort
+          echo "=== ANSIBLE_COLLECTIONS_PATH from molecule env ==="
+          echo '$HOME/.ansible/collections'
+          ls -la '$HOME/.ansible/collections' 2>&1 || echo "literal dollar-HOME path does not exist"
 
       - name: Run molecule test (default)
         run: molecule test -s default

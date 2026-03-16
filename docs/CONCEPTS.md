@@ -179,7 +179,7 @@ The partial restore process is designed to be Replication-Silent (Non-Replicatin
 
 To ensure 100% reliability when restoring specific tables from a full schema dump, the role utilizes a **Sandboxed Parsing Strategy**.
 
-Instead of using fragile Regular Expressions to extract `CREATE TABLE` statements, the `mneme_restore` module:
+Instead of using fragile Regular Expressions to extract `CREATE TABLE` statements, the `wiseops_team.mneme.restore` module:
 1. Creates a secure, ephemeral temporary directory with strict permissions (`0700`).
 2. Initializes a minimal, blank MariaDB instance (Sandbox) within this directory.
 3. Loads the schema dump into the Sandbox.

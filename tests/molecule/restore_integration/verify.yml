@@ -1,0 +1,159 @@
+---
+- name: Verify Restore Helper Integration
+  hosts: all
+  become: true
+  vars:
+    db_name: "integration_db"
+    table_name: "important_data"
+  tasks:
+    # ------------------------------------------------------------------
+    # 0. SETUP & BACKUP
+    # ------------------------------------------------------------------
+    - name: "SETUP | Get current date (aligned with wrapper logic)"
+      ansible.builtin.command: date +%Y-%m-%d
+      register: date_cmd
+      changed_when: false
+
+    - name: "SETUP | Set facts"
+      ansible.builtin.set_fact:
+        current_date: "{{ date_cmd.stdout }}"
+        expected_work_dir: "/home/data/mneme_backups/tmp/restore_{{ date_cmd.stdout }}"
+
+    - name: Ensure client defaults present for mysql client
+      import_tasks: ../common/tasks/create_my_cnf.yml
+
+    - name: "SETUP | Create DB and Data"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "{{ mneme_mysql_password | default('root') }}"
+        query:
+          - "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
+          - "CREATE TABLE IF NOT EXISTS {{ db_name }}.{{ table_name }} (id INT, val VARCHAR(10));"
+          - "INSERT INTO {{ db_name }}.{{ table_name }} VALUES (1, 'test');"
+
+    - name: "ACTION | Run Daily Backup"
+      ansible.builtin.command: /usr/local/bin/mneme_wrapper.sh --type daily
+      changed_when: true
+
+    # ------------------------------------------------------------------
+    # 1. TEST PREPARE (First Run)
+    # ------------------------------------------------------------------
+    - name: "TEST 1 | Run prepare role (First Run)"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.prepare
+      vars:
+        mneme_prepare_target_date: "{{ current_date }}"
+
+    - name: "ASSERT 1 | Check facts and files"
+      ansible.builtin.assert:
+        that:
+          - mneme_prepared_backup_dir is defined
+          - mneme_prepared_backup_dir == expected_work_dir + "/mneme_daily_" + current_date
+        fail_msg: "Helper did not return expected path facts."
+
+    - name: "ASSERT 1 | Check marker file existence"
+      ansible.builtin.stat:
+        path: "{{ expected_work_dir }}/.prepare_complete"
+      register: marker_stat_1
+      failed_when: not marker_stat_1.stat.exists
+
+    # ------------------------------------------------------------------
+    # 2. TEST IDEMPOTENCY (Smart Skip)
+    # ------------------------------------------------------------------
+    - name: "TEST 2 | Run prepare role (Second Run, idempotency)"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.prepare
+      vars:
+        mneme_prepare_target_date: "{{ current_date }}"
+
+    - name: "ASSERT 2 | Verify Idempotency (Marker shouldn't be touched)"
+      ansible.builtin.stat:
+        path: "{{ expected_work_dir }}/.prepare_complete"
+      register: marker_stat_2
+
+    - name: "ASSERT 2 | Compare timestamps"
+      ansible.builtin.assert:
+        that:
+          - marker_stat_1.stat.mtime == marker_stat_2.stat.mtime
+        fail_msg: "Idempotency failed! The marker file was modified, meaning prepare ran again."
+
+    # ------------------------------------------------------------------
+    # 3. TEST RESTORE (Integration)
+    # ------------------------------------------------------------------
+    - name: "ACTION | Drop table to simulate disaster"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "root"
+        query: "DROP TABLE {{ db_name }}.{{ table_name }};"
+
+    - name: "TEST 3 | Restore using prepared artifacts"
+      wiseops_team.mneme.restore:
+        strategy: sidecar
+        backup_dir: "{{ mneme_prepared_backup_dir }}"
+        database: "{{ db_name }}"
+        table: ["{{ table_name }}"]
+      register: restore_result
+
+    - name: "ASSERT 3 | Verify Data"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "root"
+        query: "SELECT count(*) as c FROM {{ db_name }}.{{ table_name }};"
+      register: data_check
+      failed_when: data_check.query_result[0][0].c != 1
+
+    # ------------------------------------------------------------------
+    # 4. TEST CLEANUP
+    # ------------------------------------------------------------------
+    - name: "TEST 4 | Run cleanup role"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.cleanup
+      vars:
+        mneme_prepare_target_date: "{{ current_date }}"
+
+    - name: "ASSERT 4 | Verify directory is gone"
+      ansible.builtin.stat:
+        path: "{{ expected_work_dir }}"
+      register: dir_stat
+      failed_when: dir_stat.stat.exists
+
+    # ------------------------------------------------------------------
+    # 5. TEST RECOVER ROLE (Full Cycle via Wrapper)
+    # ------------------------------------------------------------------
+    - name: "SETUP 5 | Re-create table and data for recover test"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "{{ mneme_mysql_password | default('root') }}"
+        query:
+          - "CREATE TABLE IF NOT EXISTS {{ db_name }}.{{ table_name }} (id INT, val VARCHAR(10));"
+          - "INSERT INTO {{ db_name }}.{{ table_name }} VALUES (1, 'test');"
+
+    - name: "ACTION 5 | Drop table to simulate disaster"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "root"
+        query: "DROP TABLE {{ db_name }}.{{ table_name }};"
+
+    - name: "TEST 5 | Full recovery via recover role"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.recover
+      vars:
+        mneme_recover_strategy: sidecar
+        mneme_recover_target_date: "{{ current_date }}"
+        mneme_recover_database: "{{ db_name }}"
+        mneme_recover_table:
+          - "{{ table_name }}"
+
+    - name: "ASSERT 5 | Verify data restored"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "root"
+        query: "SELECT count(*) as c FROM {{ db_name }}.{{ table_name }};"
+      register: recover_data_check
+      failed_when: recover_data_check.query_result[0][0].c != 1
+
+    - name: "ASSERT 5 | Verify cleanup ran (workspace gone)"
+      ansible.builtin.stat:
+        path: "{{ expected_work_dir }}"
+      register: recover_dir_stat
+      failed_when: recover_dir_stat.stat.exists

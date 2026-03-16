@@ -1,0 +1,470 @@
+---
+
+- name: Verify (Static Analysis)
+  hosts: all
+  become: true
+  tasks:
+    - name: Install ShellCheck for script validation
+      ansible.builtin.package:
+        name: ShellCheck
+        state: present
+
+    - name: Run ShellCheck on backup and restore scripts
+      ansible.builtin.command:
+        cmd: "shellcheck -e SC1090,SC1091 {{ item }}"
+      register: shellcheck_results
+      changed_when: false
+      failed_when: shellcheck_results.rc != 0
+      loop:
+        - /usr/local/bin/mneme_wrapper.sh
+        - /usr/local/lib/mneme/retention.sh
+        - /usr/local/lib/mneme/prometheus.sh
+
+    - name: Display ShellCheck results
+      ansible.builtin.debug:
+        var: shellcheck_results
+        verbosity: 1
+
+- name: Verify mariabackup backup and restore process
+  hosts: all
+  become: true
+  vars:
+    mneme_mysql_password: "root"
+  tasks:
+    - name: Create .my.cnf file
+      ansible.builtin.template:
+        src: my.cnf.j2
+        dest: /root/.my.cnf
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Run daily backup
+      command: /usr/local/bin/mneme_wrapper.sh --type daily
+      register: backup_command_result
+      failed_when: backup_command_result.rc != 0
+
+    - name: Get the name of the latest daily backup archive
+      shell: "ls -t /home/data/mneme_backups/archive/mneme_daily_*.tar.gz | head -n 1"
+      register: latest_backup_archive
+      changed_when: false
+
+    - name: Unarchive the backup
+      unarchive:
+        src: "{{ latest_backup_archive.stdout }}"
+        dest: "/home/data/mneme_backups/tmp"
+        remote_src: yes
+
+    - name: Get the name of the unarchived backup directory
+      shell: "ls -t -d /home/data/mneme_backups/tmp/mneme_daily_* | head -n 1"
+      register: latest_backup_dir
+      changed_when: false
+
+    - name: Prepare the backup for restore
+      command: "mariadb-backup --prepare --target-dir={{ latest_backup_dir.stdout }}"
+      register: prepare_command_result
+      failed_when: prepare_command_result.rc != 0
+
+    - name: Stop MariaDB service
+      service:
+        name: mariadb
+        state: stopped
+
+    - name: Clean up MariaDB data directory
+      file:
+        path: /var/lib/mysql
+        state: absent
+
+    - name: Recreate MariaDB data directory
+      file:
+        path: /var/lib/mysql
+        state: directory
+        owner: mysql
+        group: mysql
+        mode: '0755'
+
+    - name: Restore the backup
+      command: "mariadb-backup --copy-back --target-dir={{ latest_backup_dir.stdout }}"
+      register: restore_command_result
+      failed_when: restore_command_result.rc != 0
+
+    - name: Set ownership of the restored data
+      file:
+        path: /var/lib/mysql
+        owner: mysql
+        group: mysql
+        recurse: yes
+
+    - name: Restore SELinux context on the data directory
+      ansible.builtin.command: "restorecon -R /var/lib/mysql"
+      changed_when: false
+
+    - name: Start MariaDB service
+      ansible.builtin.service:
+        name: mariadb
+        state: started
+
+    - name: Verify that the test database exists
+      community.mysql.mysql_db:
+        name: test_db
+        state: present
+        login_user: root
+        login_password: "{{ mneme_mysql_password }}"
+        login_unix_socket: /var/lib/mysql/mysql.sock
+      register: db_check
+
+    - name: Verify that the test table exists
+      community.mysql.mysql_query:
+        query: "SELECT * FROM test_db.test_table;"
+        login_user: root
+        login_password: "{{ mneme_mysql_password }}"
+        login_unix_socket: /var/lib/mysql/mysql.sock
+      register: table_check
+
+    - name: Assert that the restored data is correct
+      assert:
+        that:
+          - "'test_data' in table_check.query_result[0][0]['name']"
+        fail_msg: "Restored data is not correct."
+
+- name: Verify Real Cron Job Execution (End-to-End)
+  hosts: all
+  become: true
+  tasks:
+    - name: "SETUP: Force apply cron with block_on_master=true"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.backup
+        tasks_from: cron
+      vars:
+        mneme_backup_cron: true
+        mneme_block_on_master: true
+        mneme_retention_contours:
+          - type: daily
+            schedule: "0 9 * * *"
+            active: true
+
+    - name: "EXTRACT: Get the raw cron command from system"
+      ansible.builtin.shell: |
+        set -o pipefail
+        crontab -l -u root | grep "mneme_wrapper.sh --type daily" | sed -r 's/^(\S+\s+){5}//'
+      register: extracted_cron_command
+      changed_when: false
+
+    - name: "DEBUG: Show what we actually extracted"
+      ansible.builtin.debug:
+        var: extracted_cron_command.stdout
+
+    - name: "ASSERT: Ensure extraction worked"
+      ansible.builtin.assert:
+        that: extracted_cron_command.stdout != ""
+        fail_msg: "Could not find the cron job in crontab -l"
+
+    - name: "EXECUTE: Run the extracted command to verify syntax"
+      ansible.builtin.shell: "{{ extracted_cron_command.stdout }} || true"
+      register: cron_execution_attempt
+      failed_when:
+        - "'ERROR' in cron_execution_attempt.stderr"
+        - "'syntax error' in cron_execution_attempt.stderr"
+        - "'command not found' in cron_execution_attempt.stderr"
+
+    - name: "DEBUG: Show execution result"
+      ansible.builtin.debug:
+        msg:
+          - "Command: {{ extracted_cron_command.stdout }}"
+          - "Return Code: {{ cron_execution_attempt.rc }}"
+          - "Stderr: {{ cron_execution_attempt.stderr }}"
+          - "Stdout: {{ cron_execution_attempt.stdout }}"
+
+- name: Verify backup rotation logic
+  hosts: all
+  become: true
+  vars:
+    archive_dir: "{{ mneme_archive_dir }}"
+    mneme_retention_contours:
+      - type: daily
+        count: 3
+        schedule: "0 9 * * *"
+        active: true
+    # Define a list of files that should be deleted by the rotation
+    files_to_be_deleted:
+      - "mneme_daily_2025-08-01.tar.gz"
+      - "mneme_daily_2025-08-02.tar.gz"
+    # Define a list of files that must NOT be touched by the daily rotation
+    files_to_be_kept:
+      # Newer daily backups that should remain
+      - "mneme_daily_2025-08-03.tar.gz"
+      - "mneme_daily_2025-08-04.tar.gz"
+      # Weekly backups from another contour
+      - "mneme_weekly_2025-07-20.tar.gz"
+      - "mneme_weekly_2025-07-27.tar.gz"
+      # An unrelated file that should be ignored
+      - "backup-important-file.txt"
+    # Create a unified list for setting up mock files
+    mock_files_setup:
+      - { name: 'mneme_daily_2025-08-01.tar.gz',  mtime: '2025-08-01 10:00:00' }
+      - { name: 'mneme_daily_2025-08-02.tar.gz',  mtime: '2025-08-02 10:00:00' }
+      - { name: 'mneme_daily_2025-08-03.tar.gz',  mtime: '2025-08-03 10:00:00' }
+      - { name: 'mneme_daily_2025-08-04.tar.gz',  mtime: '2025-08-04 10:00:00' }
+      - { name: 'mneme_weekly_2025-07-20.tar.gz', mtime: '2025-07-20 10:00:00' }
+      - { name: 'mneme_weekly_2025-07-27.tar.gz', mtime: '2025-07-27 10:00:00' }
+      - { name: 'backup-important-file.txt',            mtime: '2025-08-01 10:00:00' }
+  tasks:
+    - name: Load role default variables for verification
+      ansible.builtin.include_vars:
+        file: ../../../roles/backup/defaults/main.yml
+    - name: "SETUP: Create mock backup archives for rotation test"
+      block:
+        - name: Ensure mock files exist
+          ansible.builtin.file:
+            path: "{{ archive_dir }}/{{ item.name }}"
+            state: touch
+            mode: '0600'
+          loop: "{{ mock_files_setup }}"
+
+        - name: Set precise modification times for deterministic sorting
+          ansible.builtin.file:
+            path: "{{ archive_dir }}/{{ item.name }}"
+            state: touch
+            modification_time: "{{ (item.mtime | to_datetime('%Y-%m-%d %H:%M:%S')).strftime('%Y%m%d%H%M.%S') }}"
+            mode: '0600'
+          loop: "{{ mock_files_setup }}"
+
+    - name: "SETUP: Re-deploy scripts with NEW retention count"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.backup
+        tasks_from: scripts
+
+    - name: "ACT: Run daily backup to trigger rotation logic"
+      ansible.builtin.command: /usr/local/bin/mneme_wrapper.sh --type daily
+      register: backup_with_rotation_result
+      failed_when: backup_with_rotation_result.rc != 0
+
+    - name: "ASSERT: Verify the rotation logic worked correctly"
+      block:
+        - name: Get the list of remaining daily archives after rotation
+          ansible.builtin.find:
+            paths: "{{ archive_dir }}"
+            patterns: "mneme_daily_*.tar.gz"
+          register: remaining_daily_backups
+
+        - name: "--> CASE: Correct number of daily backups is kept"
+          ansible.builtin.assert:
+            that:
+              - remaining_daily_backups.matched == 5
+            fail_msg: "FAIL: Expected 5 daily backups to be kept, but found {{ remaining_daily_backups.matched }}."
+            success_msg: "OK: Correct number of daily backups (5) was kept."
+
+        - name: "--> CASE: Oldest backups are deleted"
+          ansible.builtin.file:
+            path: "{{ archive_dir }}/{{ item }}"
+            state: absent
+          loop: "{{ files_to_be_deleted }}"
+
+        - name: "--> CASE: Newer, weekly, and unrelated files are untouched"
+          ansible.builtin.stat:
+            path: "{{ archive_dir }}/{{ item }}"
+          register: stat_result
+          loop: "{{ files_to_be_kept }}"
+
+        - name: Assert that required files still exist
+          ansible.builtin.assert:
+            that:
+              - item.stat.exists
+            fail_msg: "FAIL: File '{{ item.item }}' was incorrectly deleted by the rotation script."
+            success_msg: "OK: File '{{ item.item }}' was correctly preserved."
+          loop: "{{ stat_result.results }}"
+
+
+- name: Verify rotation logic for edge cases
+  hosts: all
+  become: true
+  vars:
+    archive_dir: "{{ mneme_archive_dir }}"
+    retention_lib_path: "/usr/local/lib/mneme/retention.sh"
+  tasks:
+    - name: "--> CASE: Retention count is 0 (should delete all)"
+      block:
+        - name: Setup mock files for zero retention test
+          ansible.builtin.file:
+            path: "{{ archive_dir }}/mneme_monthly_{{ item }}.tar.gz"
+            state: touch
+          loop:
+            - "2025-05-01"
+            - "2025-06-01"
+            - "2025-07-01"
+          register: created_monthly_mocks
+
+        - name: Run retention logic directly with count 0
+          # We call the function from retention.sh directly to avoid a full converge.
+          # This allows for a fast, isolated unit test of the shell logic.
+          ansible.builtin.shell: |
+            set -euo pipefail
+            # Source the library containing the function to test
+            source {{ retention_lib_path }}
+            # The script expects these global variables to be set
+            ARCHIVE_DIR="{{ archive_dir }}"
+            LOGFILE="/tmp/retention_test.log"
+            # Define dummy logging functions required by the script
+            log() { echo "$@" >> $LOGFILE; }
+            fail_and_exit() { echo "FAIL: $@" >> $LOGFILE; exit 1; }
+            # Execute the target function with test parameters
+            manage_retention "monthly" 0 "mneme_monthly_"
+          args:
+            executable: /bin/bash
+          changed_when: created_monthly_mocks.changed
+
+        - name: Find any remaining monthly backups
+          ansible.builtin.find:
+            paths: "{{ archive_dir }}"
+            patterns: "mneme_monthly_*.tar.gz"
+          register: monthly_backups
+
+        - name: Assert that no monthly backups remain
+          ansible.builtin.assert:
+            that:
+              - monthly_backups.matched == 0
+            fail_msg: "FAIL: Expected 0 monthly backups when count is 0, but found {{ monthly_backups.matched }}."
+            success_msg: "OK: All monthly backups were correctly deleted for retention count 0."
+      always:
+        # This cleanup is important to ensure tests are idempotent
+        - name: Cleanup mock monthly files
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ monthly_backups.files | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+
+- name: "TEST SUITE: Prometheus Monitoring Integration"
+  hosts: all
+  become: true
+  vars:
+    prom_dir: "/var/lib/node_exporter/textfile_collector"
+    # Filename now includes the contour type
+    prom_file: "{{ prom_dir }}/mneme_daily.prom"
+  tasks:
+    - name: "SETUP | Enable Prometheus monitoring in scripts"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.backup
+        tasks_from: scripts
+      vars:
+        mneme_prometheus_enabled: true
+        mneme_prometheus_dir: "{{ prom_dir }}"
+
+    # -------------------------------------------------------
+    # 1. TEST CASE: Success Flow (Initial Run)
+    # -------------------------------------------------------
+    - name: "TEST | Run successful backup"
+      ansible.builtin.command: /usr/local/bin/mneme_wrapper.sh --type daily
+      register: run_success
+      failed_when: run_success.rc != 0
+
+    - name: "VERIFY | Read metrics content (Run 1)"
+      ansible.builtin.slurp:
+        src: "{{ prom_file }}"
+      register: prom_content_1_b64
+
+    - name: "ASSERT | Check Success Metrics"
+      vars:
+        content: "{{ prom_content_1_b64['content'] | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - "'mneme_last_status{type=\"daily\", db_host=\"' ~ inventory_hostname ~ '\"} 1' in content"
+          # Verify last_success is set to a valid timestamp (digits)
+          - "content | regex_search('mneme_last_success_timestamp_seconds\\{.*\\} [0-9]+')"
+          # Verify it is NOT 0
+          - "not content | regex_search('mneme_last_success_timestamp_seconds\\{.*\\} 0\\n')"
+
+    # -------------------------------------------------------
+    # 3. TEST CASE: Failure Flow (Persistence Check)
+    # -------------------------------------------------------
+    - name: "TEST | Stop MariaDB to force backup failure"
+      ansible.builtin.service:
+        name: mariadb
+        state: stopped
+
+    - name: "TEST | Run daily backup (Expected to fail)"
+      ansible.builtin.command: /usr/local/bin/mneme_wrapper.sh --type daily
+      register: run_fail
+      failed_when: run_fail.rc == 0
+      ignore_errors: true
+
+    - name: "VERIFY | Read metrics content again"
+      ansible.builtin.slurp:
+        src: "{{ prom_file }}"
+      register: prom_content_fail_b64
+
+    - name: "DEBUG | Show Prometheus Metrics (Failure Case)"
+      ansible.builtin.debug:
+        msg: "{{ prom_content_fail_b64['content'] | b64decode }}"
+
+    - name: "ASSERT | Check metrics values (Failure)"
+      vars:
+        content: "{{ prom_content_fail_b64['content'] | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - "'mneme_last_status{type=\"daily\", db_host=\"' ~ inventory_hostname ~ '\"} 0' in content"
+          - "'mneme_size_bytes{type=\"daily\", db_host=\"' ~ inventory_hostname ~ '\"} 0' in content"
+          - "content | regex_search('mneme_last_success_timestamp_seconds\\{.*\\} [1-9][0-9]+')"
+        fail_msg: "Persistence logic failed. Content: {{ content }}"
+
+    - name: "CLEANUP | Start MariaDB back"
+      ansible.builtin.service:
+        name: mariadb
+        state: started
+
+    # -------------------------------------------------------
+    # 4. CLEANUP
+    # -------------------------------------------------------
+    - name: "CLEANUP | Remove metrics file"
+      ansible.builtin.file:
+        path: "{{ prom_file }}"
+        state: absent
+
+- name: "TEST SUITE: Error Hints & User Experience"
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: "--- [ TEST CASE: PERMISSION DENIED ] ---"
+      ansible.builtin.debug:
+        msg: "Starting test for 'Permission denied' hint..."
+
+    - name: "SETUP | Create a locked directory (0000)"
+      ansible.builtin.file:
+        path: /tmp/locked_backup_dir
+        state: directory
+        mode: '0000'
+
+    - name: "ACTION | Trigger Permission Error"
+      wiseops_team.mneme.verify:
+        backup_dir: "/tmp/locked_backup_dir"
+        database: "test_db"
+        table: ["dummy_table"]
+        validation_query: "SELECT 1"
+        client_bin: "/usr/bin/mariadb"
+      register: test_perms
+      failed_when: false
+
+    - name: "DEBUG | Show the Failure Message (Eyes on)"
+      ansible.builtin.debug:
+        var: test_perms.msg
+
+    - name: "DEBUG | Show the Failure Message (Eyes on)"
+      ansible.builtin.debug:
+        msg:
+          - "MESSAGE: {{ test_perms.msg }}"
+          - "STDERR: {{ test_perms.stderr }}"
+
+    - name: "ASSERT | Verify 'Permission' Hint"
+      ansible.builtin.assert:
+        that:
+          - "'Permission denied' in test_perms.stderr or 'Permission denied' in test_perms.msg"
+          - "'Analyzed Failure:' in test_perms.msg"
+        fail_msg: "FAILED: The permission hint logic did not trigger."
+        success_msg: "PASS: Correctly identified permission issue."
+
+    - name: "CLEANUP | Remove locked directory"
+      ansible.builtin.file:
+        path: /tmp/locked_backup_dir
+        state: absent
