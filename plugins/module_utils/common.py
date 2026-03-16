@@ -221,17 +221,18 @@ KNOWN_ERROR_HINTS = {
 # --- Security Helpers ---
 
 def sanitize_identifier(name):
+    """Validates identifier. Raises ValueError if invalid."""
     if not name:
         return name
-
-    if not re.match(r'^[a-zA-Z_$][a-zA-Z0-9_$]*$', name):
-        if re.search(r'[;\'"\\`\x00]', name):
-            raise ValueError(f"Forbidden characters in identifier: {name}")
-
     if name.startswith('-'):
         raise ValueError(f"Identifier cannot start with dash: {name}")
+    if not re.match(r'^[a-zA-Z_$][a-zA-Z0-9_$]*$', name):
+        raise ValueError(f"Invalid identifier: {name}")
+    return name
 
-    return name.replace('`', '``')
+def quote_identifier(name):
+    """Wraps a pre-validated identifier in backticks for SQL."""
+    return f"`{name.replace('`', '``')}`"
 
 
 def validate_path_within_base(module, base_path, target_path, param_name="path"):

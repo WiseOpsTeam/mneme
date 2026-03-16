@@ -75,7 +75,7 @@ import subprocess
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.wiseops_team.mneme.plugins.module_utils.common import (
     get_binary, check_disk_space, run_cmd, exec_sql, discover_tables,
-    MariaDBSandbox, BackupSidecar, fail_with_hint, sanitize_identifier, validate_path_within_base
+    MariaDBSandbox, BackupSidecar, fail_with_hint, sanitize_identifier, validate_path_within_base, quote_identifier
 )
 
 
@@ -163,18 +163,18 @@ def restore_single_table_direct(module, params, client_bin, login_config, db, db
         return
 
     # Check if table exists in target DB (using sanitized identifiers)
-    check_sql = "SELECT 1 FROM information_schema.tables WHERE table_schema='{0}' AND table_name='{1}'".format(
-        db_safe, tbl_safe
+    check_query = (
+        f"SELECT 1 FROM information_schema.tables "
+        f"WHERE table_schema = '{db_safe}' AND table_name = '{tbl_safe}'"
     )
-    out, _, _ = run_cmd(module, [client_bin, '--defaults-file={}'.format(login_config), '-N', '-B', '-e', check_sql],
-                        check=False)
+    out = exec_sql(module, client_bin, login_config, None, check_query)
     table_exists = "1" in str(out)
 
     # Schema handling
     if sandbox:
         stmt = sandbox.get_create_statement(db, tbl)
         if stmt:
-            exec_sql(module, client_bin, login_config, db, "DROP TABLE IF EXISTS `{}`".format(tbl_safe))
+            exec_sql(module, client_bin, login_config, db, f"DROP TABLE IF EXISTS {quote_identifier(tbl_safe)}")
             exec_sql(module, client_bin, login_config, db, stmt)
         elif not table_exists:
             module.fail_json(msg="Table {} missing and not found in schema file (Sandbox parsing)".format(tbl))
@@ -196,10 +196,10 @@ def restore_single_table_direct(module, params, client_bin, login_config, db, db
             validate_path_within_base(module, backup_dir, src_ibd, "source .ibd file")
 
             # Create dummy table to import tablespace
-            exec_sql(module, client_bin, login_config, db, "DROP TABLE IF EXISTS `{}`".format(dummy))
-            exec_sql(module, client_bin, login_config, db, "CREATE TABLE `{}` LIKE `{}`".format(dummy, tbl_safe))
-            exec_sql(module, client_bin, login_config, db, "ALTER TABLE `{}` REMOVE PARTITIONING".format(dummy))
-            exec_sql(module, client_bin, login_config, db, "ALTER TABLE `{}` DISCARD TABLESPACE".format(dummy))
+            exec_sql(module, client_bin, login_config, db, f"DROP TABLE IF EXISTS {quote_identifier(dummy)}")
+            exec_sql(module, client_bin, login_config, db, f"CREATE TABLE {quote_identifier(dummy)} LIKE {quote_identifier(tbl_safe)}")
+            exec_sql(module, client_bin, login_config, db, f"ALTER TABLE {quote_identifier(dummy)} REMOVE PARTITIONING")
+            exec_sql(module, client_bin, login_config, db, f"ALTER TABLE {quote_identifier(dummy)} DISCARD TABLESPACE")
 
             # Copy files
             dst_dir = os.path.join(datadir, db)
@@ -216,13 +216,13 @@ def restore_single_table_direct(module, params, client_bin, login_config, db, db
             if os.path.exists(dst_cfg): shutil.chown(dst_cfg, user=sys_user, group=sys_user)
 
             # Import and Exchange
-            exec_sql(module, client_bin, login_config, db, "ALTER TABLE `{}` IMPORT TABLESPACE".format(dummy))
+            exec_sql(module, client_bin, login_config, db, f"ALTER TABLE {quote_identifier(dummy)} IMPORT TABLESPACE")
             exec_sql(module, client_bin, login_config, db,
-                     "ALTER TABLE `{}` EXCHANGE PARTITION `{}` WITH TABLE `{}`".format(tbl_safe, part_name_safe, dummy))
-            exec_sql(module, client_bin, login_config, db, "DROP TABLE `{}`".format(dummy))
+                     f"ALTER TABLE {quote_identifier(tbl_safe)} EXCHANGE PARTITION {quote_identifier(part_name_safe)} WITH TABLE {quote_identifier(dummy)}")
+            exec_sql(module, client_bin, login_config, db, f"DROP TABLE {quote_identifier(dummy)}")
     else:
         # Standard table (using sanitized identifier)
-        exec_sql(module, client_bin, login_config, db, "ALTER TABLE `{}` DISCARD TABLESPACE".format(tbl_safe))
+        exec_sql(module, client_bin, login_config, db, f"ALTER TABLE {quote_identifier(tbl_safe)} DISCARD TABLESPACE")
 
         dst_dir = os.path.join(datadir, db)
         dst_ibd = os.path.join(dst_dir, "{}.ibd".format(tbl_safe))
@@ -244,7 +244,8 @@ def restore_single_table_direct(module, params, client_bin, login_config, db, db
         shutil.chown(dst_ibd, user=sys_user, group=sys_user)
         if os.path.exists(dst_cfg): shutil.chown(dst_cfg, user=sys_user, group=sys_user)
 
-        exec_sql(module, client_bin, login_config, db, "ALTER TABLE `{}` IMPORT TABLESPACE".format(tbl_safe))
+        exec_sql(module, client_bin, login_config, db, f"ALTER TABLE {quote_identifier(tbl_safe)} IMPORT TABLESPACE")
+
 
 def run_direct_restore(module, params):
     if not params['force']:
@@ -338,13 +339,6 @@ def run_sidecar_restore(module, params):
     except ValueError as e:
         module.fail_json(msg=f"Invalid database name: {e}")
 
-    if tables:
-        for t in tables:
-            try:
-                sanitize_identifier(t)
-            except ValueError as e:
-                module.fail_json(msg=f"Invalid table name: {e}")
-
     # Validate and sanitize all table names
     if tables:
         for t in tables:
@@ -380,6 +374,7 @@ def run_sidecar_restore(module, params):
         restore_cmd = [
             client_bin,
             "--defaults-file={}".format(login_config),
+            "--init-command=SET SESSION sql_log_bin=0; SET FOREIGN_KEY_CHECKS=0;",
             db
         ]
 
