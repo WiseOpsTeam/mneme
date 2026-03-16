@@ -8,13 +8,15 @@
         name: ShellCheck
         state: present
 
-    - name: Run ShellCheck on Wrapper script only (Restore script is replaced by Module)
+    - name: Run ShellCheck on all library scripts
       ansible.builtin.command:
-        cmd: "shellcheck -e SC1090,SC1091 /usr/local/bin/mneme_wrapper.sh"
-      register: shellcheck_results
-      changed_when: false
-      failed_when: shellcheck_results.rc != 0
-      ignore_errors: true
+        cmd: "shellcheck -e SC1090,SC1091 {{ item }}"
+      loop:
+        - /usr/local/bin/mneme_wrapper.sh
+        - /usr/local/lib/mneme/retention.sh
+        - /usr/local/lib/mneme/prometheus.sh
+        - /usr/local/lib/mneme/replication.sh
+        - /usr/local/lib/mneme/monitoring.sh
 
 - name: Verify partial backup and restore (Module Based)
   hosts: all
