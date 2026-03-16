@@ -29,42 +29,5 @@ explicit tasks in your playbook.
 | `mneme_recover_force` | `false` | Required for `direct` strategy. |
 | `mneme_recover_skip_cleanup` | `false` | If `true`, skips cleanup. Useful when you need `mneme_prepared_backup_dir` after the role. |
 
-## Examples
-
-### Restore a single table (sidecar)
-```yaml
-- role: wiseops_team.mneme.recover
-  vars:
-    mneme_recover_strategy: sidecar
-    mneme_recover_target_date: "2026-03-15"
-    mneme_recover_database: production_db
-    mneme_recover_table:
-      - users
-```
-
-### Restore entire database (direct, auto-discovery)
-```yaml
-- role: wiseops_team.mneme.recover
-  vars:
-    mneme_recover_strategy: direct
-    mneme_recover_target_date: "latest"
-    mneme_recover_database: production_db
-    mneme_recover_schema_file: "/home/data/mneme_backups/tmp/restore_latest/mneme_schema_daily_latest/production_db_schema.sql"
-    mneme_recover_force: true
-```
-
-### Keep workspace after recovery for inspection
-```yaml
-- role: wiseops_team.mneme.recover
-  vars:
-    mneme_recover_strategy: sidecar
-    mneme_recover_database: production_db
-    mneme_recover_table: [orders]
-    mneme_recover_skip_cleanup: true
-
-- name: Inspect prepared artifacts
-  ansible.builtin.debug:
-    var: mneme_prepared_backup_dir
-```
 
 See the [Recovery Runbook](../../docs/RECOVERY_RUNBOOK.md) for full details.

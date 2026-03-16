@@ -148,10 +148,6 @@ Faster than `sidecar` for large datasets. If the tables were dropped, `schema_fi
         mneme_recover_target_date: "latest"
         mneme_recover_database: production_db
         mneme_recover_force: true
-        # schema_file is required if tables were dropped:
-        # mneme_recover_schema_file: >-
-        #   {{ mneme_prepared_backup_dir }}/../mneme_schema_daily_{{ mneme_recover_target_date }}
-        #   /production_db_schema.sql
 
   post_tasks:
     - name: Verify row counts

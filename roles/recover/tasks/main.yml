@@ -7,13 +7,22 @@
     mneme_prepare_target_date: "{{ mneme_recover_target_date }}"
     mneme_prepare_type: "{{ mneme_recover_type }}"
 
+- name: Check if schema file exists for the requested database
+  ansible.builtin.stat:
+    path: "{{ mneme_prepared_schema_dir }}/{{ mneme_recover_database }}_schema.sql"
+  register: _schema_file_stat
+  when: mneme_recover_strategy == 'direct'
+
 - name: Run restore
   wiseops_team.mneme.restore:
     strategy: "{{ mneme_recover_strategy }}"
     backup_dir: "{{ mneme_prepared_backup_dir }}"
     database: "{{ mneme_recover_database | default(omit) }}"
     table: "{{ mneme_recover_table | default(omit) }}"
-    schema_file: "{{ mneme_recover_schema_file | default(omit) }}"
+    schema_file: >-
+      {{ _schema_file_stat.stat.path 
+         if (_schema_file_stat.stat.exists | default(false)) 
+         else omit }}
     datadir: "{{ mneme_recover_datadir }}"
     force: "{{ mneme_recover_force }}"
     client_bin: "{{ mneme_mariadb_bin_path }}"

@@ -7,7 +7,7 @@
 | `mneme_temp_dir`           | string   | `/home/data/mneme_backups/tmp`                    | Temporary directory used during backup process                                            |
 | `mneme_log_dir`            | string   | `/var/log/mariabackup`                            | Directory to store backup logs                                                            |
 | `mneme_data_dir`           | string   | `/var/lib/mysql`                                  | Database location                                                                         |
-| `mneme_retention_contours` | list     | complex list of dayly, weekly and monthly backups | The cronjobs and the retention policy are set in this variable. See in description below. |
+| `mneme_retention_contours` | list     | complex list of daily, weekly and monthly backups | The cronjobs and the retention policy are set in this variable. See in description below. |
 | `mneme_backup_cron`        | bool     | `true`                                            | Trigger activating the cronjob of regular backup                                          |
 | `mneme_mailto_address`     | string   | `root@example.com`                                | Email address for cron job notifications                                                  |
 
