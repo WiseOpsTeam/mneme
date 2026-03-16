@@ -55,8 +55,8 @@ The collection is organized into three roles:
 | Role | Description |
 |:-----|:------------|
 | `wiseops_team.mneme.backup` | Installation, configuration, cron scheduling, retention, and monitoring. |
-| `wiseops_team.mneme.restore` | Preparation of backup artifacts (unarchiving, permissions, `--prepare --export`). |
-| `wiseops_team.mneme.verify` | Automated backup verification drills using ephemeral restore. |
+| `wiseops_team.mneme.prepare` | Preparation of backup artifacts (unarchiving, permissions, `--prepare --export`). |
+| `wiseops_team.mneme.drill` | Automated backup verification drills using ephemeral restore. |
 
 And two custom modules:
 
@@ -206,7 +206,7 @@ Here is a complete, compact playbook to restore a specific table from a specific
     # 2. Auto-discovery, Unarchiving & Preparation
     - name: Prepare Backup Artifacts
       ansible.builtin.include_role:
-        name: wiseops_team.mneme.restore
+        name: wiseops_team.mneme.prepare
         tasks_from: prepare
 
     # 3. Restore (Sidecar strategy: zero downtime, specific table)
@@ -220,7 +220,7 @@ Here is a complete, compact playbook to restore a specific table from a specific
     # 4. Cleanup workspace
     - name: Cleanup Temp Files
       ansible.builtin.include_role:
-        name: wiseops_team.mneme.restore
+        name: wiseops_team.mneme.prepare
         tasks_from: cleanup
 ```
 

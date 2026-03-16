@@ -117,9 +117,9 @@
 |:---------------------------------------|:---------|:------------|:-----------------------------------------------------------------|
 | `mneme_xtrabackup_compatibility` | bool     | false       | If true, the role skips the installation of mariabackup package. |
 
-### Restore & Recovery Configuration (`wiseops_team.mneme.restore`)
+### Restore & Recovery Configuration (`wiseops_team.mneme.prepare` role)
 
-These variables are used by the `wiseops_team.mneme.restore` role (`tasks_from: prepare` helper).
+These variables are used by the `wiseops_team.mneme.prepare` role.
 
 | **Variable**                          | **Default**                                     | **Description**                                                                                                                       |
 |:--------------------------------------|:------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------|

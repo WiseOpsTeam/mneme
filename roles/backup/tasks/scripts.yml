@@ -15,7 +15,7 @@
 - name: Deploy retention library script
   ansible.builtin.template:
     src: lib/retention.sh.j2
-    dest: /usr/local/lib/mariabackup/retention.sh
+    dest: /usr/local/lib/mneme/retention.sh
     owner: "{{ mneme_backup_script_owner }}"
     group: "{{ mneme_backup_script_group }}"
     mode: "{{ mneme_backup_script_mode }}"
@@ -26,7 +26,7 @@
 - name: Deploy monitoring library script
   ansible.builtin.template:
     src: lib/monitoring.sh.j2
-    dest: /usr/local/lib/mariabackup/monitoring.sh
+    dest: /usr/local/lib/mneme/monitoring.sh
     owner: "{{ mneme_backup_script_owner }}"
     group: "{{ mneme_backup_script_group }}"
     mode: "{{ mneme_backup_script_mode }}"
@@ -37,7 +37,7 @@
 - name: Deploy replication library script
   ansible.builtin.template:
     src: lib/replication.sh.j2
-    dest: /usr/local/lib/mariabackup/replication.sh
+    dest: /usr/local/lib/mneme/replication.sh
     owner: "{{ mneme_backup_script_owner }}"
     group: "{{ mneme_backup_script_group }}"
     mode: "{{ mneme_backup_script_mode }}"
@@ -48,7 +48,7 @@
 - name: Deploy prometheus library script
   ansible.builtin.template:
     src: lib/prometheus.sh.j2
-    dest: /usr/local/lib/mariabackup/prometheus.sh
+    dest: /usr/local/lib/mneme/prometheus.sh
     owner: "{{ mneme_backup_script_owner }}"
     group: "{{ mneme_backup_script_group }}"
     mode: "{{ mneme_backup_script_mode }}"

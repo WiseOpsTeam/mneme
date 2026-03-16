@@ -1,7 +1,0 @@
----
-# Точка входа роли restore.
-# Выполняет подготовку артефактов, НО НЕ запускает восстановление автоматически.
-# Модуль wiseops_team.mneme.restore вызывается пользователем явно в плейбуке.
-
-- name: Prepare backup artifacts for restoration
-  ansible.builtin.include_tasks: prepare.yml

@@ -17,8 +17,8 @@
       failed_when: shellcheck_results.rc != 0
       loop:
         - /usr/local/bin/mneme_wrapper.sh
-        - /usr/local/lib/mariabackup/retention.sh
-        - /usr/local/lib/mariabackup/prometheus.sh
+        - /usr/local/lib/mneme/retention.sh
+        - /usr/local/lib/mneme/prometheus.sh
 
     - name: Display ShellCheck results
       ansible.builtin.debug:
@@ -280,7 +280,7 @@
   become: true
   vars:
     archive_dir: "{{ mneme_archive_dir }}"
-    retention_lib_path: "/usr/local/lib/mariabackup/retention.sh"
+    retention_lib_path: "/usr/local/lib/mneme/retention.sh"
   tasks:
     - name: "--> CASE: Retention count is 0 (should delete all)"
       block:

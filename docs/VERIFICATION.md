@@ -1,6 +1,6 @@
 # Backup Verification & Disaster Recovery Drills
 
-Trusting a backup without testing it is a strategy for failure. This role includes a dedicated module `wiseops_team.mneme.verify` designed to be part of your CI/CD pipeline or nightly cron jobs.
+Trusting a backup without testing it is a strategy for failure. This collection provides the `wiseops_team.mneme.drill` role to orchestrate verification, which internally uses the dedicated `wiseops_team.mneme.verify` module.
 
 ## How It Works (The "Ephemeral" Concept)
 
