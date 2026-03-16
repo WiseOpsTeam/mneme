@@ -421,12 +421,21 @@ def run_sidecar_restore(module, params):
         ]
 
         # Pipe: dump -> restore
-        # module.run_command does not support inter-process pipes natively,
-        # so we shell out intentionally for this pipeline.
-        shell_cmd = ' '.join(dump_cmd) + ' | ' + ' '.join(restore_cmd)
-        rc, _, err = module.run_command(['/bin/sh', '-c', shell_cmd])
-        if rc != 0:
-            fail_with_hint(module, "Sidecar dump|restore pipeline failed", err.encode(), cmd=shell_cmd)
+        # subprocess.Popen is used intentionally here: module.run_command does not
+        # support inter-process pipes, and shell=True would break argument quoting
+        # for --init-command which contains semicolons. noqa is required.
+        import subprocess
+        p1 = subprocess.Popen(dump_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # noqa: E501
+        p2 = subprocess.Popen(restore_cmd, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # noqa: E501
+        p1.stdout.close()
+
+        _, err_restore = p2.communicate()
+        _, err_dump = p1.communicate()
+
+        if p1.returncode != 0:
+            fail_with_hint(module, "Sidecar Dump failed", err_dump, cmd=" ".join(dump_cmd))
+        if p2.returncode != 0:
+            fail_with_hint(module, "Sidecar Restore failed", err_restore, cmd=" ".join(restore_cmd))
 
     module.exit_json(changed=True, msg="Restored {} tables via Sidecar".format(len(tables)))
 
