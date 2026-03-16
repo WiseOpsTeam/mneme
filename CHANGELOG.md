@@ -1,3 +1,6 @@
+## [2.2.1] - 2026-03-17
+Minor fixes for Ansible Galaxy publish
+
 ## [2.2.0] - 2026-03-16
 
 ### Breaking Changes
