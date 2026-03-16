@@ -141,7 +141,7 @@ def run_verify(module, params):
                 client_bin,
                 f"--defaults-file={login_config}",
                 "--init-command=SET SESSION sql_log_bin=0; SET FOREIGN_KEY_CHECKS=0;",
-                db_name
+                temp_db_name
             ]
 
             p1 = subprocess.Popen(dump_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
