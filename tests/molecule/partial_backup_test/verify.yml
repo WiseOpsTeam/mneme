@@ -719,7 +719,6 @@
         - name: "ACTION | Run restore_prepare with 'latest' (Fallback)"
           ansible.builtin.include_role:
             name: wiseops_team.mneme.prepare
-            tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
             mneme_prepare_target_date: "latest"
@@ -746,7 +745,6 @@
         - name: "ACTION | Run restore_prepare with 'latest' (Safe Mode)"
           ansible.builtin.include_role:
             name: wiseops_team.mneme.prepare
-            tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
             mneme_prepare_target_date: "latest"
@@ -765,7 +763,6 @@
         - name: "ACTION | Run restore_prepare for DAILY type"
           ansible.builtin.include_role:
             name: wiseops_team.mneme.prepare
-            tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
             mneme_prepare_target_date: "latest"
@@ -804,7 +801,6 @@
             - name: "Run restore_prepare (Should Fail)"
               ansible.builtin.include_role:
                 name: wiseops_team.mneme.prepare
-                tasks_from: prepare
               vars:
                 mneme_archive_dir: "/tmp/integrity_test"
                 mneme_prepare_target_date: "latest"

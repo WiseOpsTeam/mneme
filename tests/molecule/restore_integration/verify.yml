@@ -41,7 +41,6 @@
     - name: "TEST 1 | Run restore_prepare helper (First Run)"
       ansible.builtin.include_role:
         name: wiseops_team.mneme.prepare
-        tasks_from: prepare
       vars:
         mneme_prepare_target_date: "{{ current_date }}"
 
@@ -64,7 +63,6 @@
     - name: "TEST 2 | Run restore_prepare helper (Second Run)"
       ansible.builtin.include_role:
         name: wiseops_team.mneme.prepare
-        tasks_from: prepare
       vars:
         mneme_prepare_target_date: "{{ current_date }}"
 
