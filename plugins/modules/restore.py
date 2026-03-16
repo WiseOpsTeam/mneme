@@ -1,14 +1,22 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+# Copyright (c) 2024, Ivan Gumeniuk <WiseOps>
+# GNU General Public License v3.0+ (see LICENSES/GPL-3.0-or-later.txt or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 from __future__ import (absolute_import, division, print_function)
 
 __metaclass__ = type
 
 DOCUMENTATION = r'''
 ---
-module: wiseops_team.mneme.restore
+module: restore
 short_description: Universal DR module. Supports Sidecar (Logical), Direct (Physical), and Copy-Back strategies.
+description:
+  - Restores MariaDB databases and tables from mariabackup artifacts.
+  - Supports four strategies - sidecar, direct, copy_back, and move_back.
+  - Requires backup artifacts prepared in advance by the wiseops_team.mneme.prepare role.
 options:
   strategy:
     description: Restore strategy.
@@ -23,13 +31,15 @@ options:
     description: Target database name (Required for sidecar/direct).
     type: str
   table:
-    description: Target table name or list of tables.
-    If empty, all tables in DB are restored.
+    description:
+      - Target table name or list of tables.
+      - If empty, all tables in DB are restored.
     type: list
     elements: str
   schema_file:
-    description: Optional path to .sql schema file.
-    Used to recreate tables in 'direct' mode.
+    description:
+      - Optional path to .sql schema file.
+      - Used to recreate tables in direct mode.
     type: path
   # --- Binary Paths ---
   client_bin:
@@ -50,8 +60,9 @@ options:
     type: path
     default: /var/lib/mysql
   temp_dir:
-    description: Directory for sockets and temp files.
-    Must be writable.
+    description:
+      - Directory for sockets and temp files.
+      - Must be writable.
     type: path
   login_config:
     description: Path to .my.cnf.
@@ -66,12 +77,43 @@ options:
     type: bool
     default: false
 author:
-  - Ivan Gumeniuk (IMHIO LTD)
+  - Ivan Gumeniuk (@meklon)
 '''
 
+EXAMPLES = r'''
+- name: Sidecar restore of specific tables
+  wiseops_team.mneme.restore:
+    strategy: sidecar
+    backup_dir: /home/data/mneme_backups/tmp/restore_2026-03-15/mneme_daily_2026-03-15
+    database: production_db
+    table:
+      - users
+      - orders
+
+- name: Full instance copy_back restore
+  wiseops_team.mneme.restore:
+    strategy: copy_back
+    backup_dir: /home/data/mneme_backups/tmp/restore_2026-03-15/mneme_daily_2026-03-15
+    force: true
+'''
+
+RETURN = r'''
+changed:
+  description: Whether any changes were made.
+  type: bool
+  returned: always
+msg:
+  description: Human-readable result message.
+  type: str
+  returned: always
+restored_tables:
+  description: List of tables that were restored (sidecar/direct strategies).
+  type: list
+  elements: str
+  returned: when strategy is sidecar or direct
+'''
 import os
 import shutil
-import subprocess
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.wiseops_team.mneme.plugins.module_utils.common import (
     get_binary, check_disk_space, run_cmd, exec_sql, discover_tables,
@@ -379,17 +421,12 @@ def run_sidecar_restore(module, params):
         ]
 
         # Pipe: dump -> restore
-        p1 = subprocess.Popen(dump_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        p2 = subprocess.Popen(restore_cmd, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        p1.stdout.close()  # Allow p1 to receive SIGPIPE if p2 exits
-
-        _, err_restore = p2.communicate()
-        _, err_dump = p1.communicate()
-
-        if p1.returncode != 0:
-            fail_with_hint(module, "Sidecar Dump failed", err_dump, cmd=" ".join(dump_cmd))
-        if p2.returncode != 0:
-            fail_with_hint(module, "Sidecar Restore failed", err_restore, cmd=" ".join(restore_cmd))
+        # module.run_command does not support inter-process pipes natively,
+        # so we shell out intentionally for this pipeline.
+        shell_cmd = ' '.join(dump_cmd) + ' | ' + ' '.join(restore_cmd)
+        rc, _, err = module.run_command(['/bin/sh', '-c', shell_cmd])
+        if rc != 0:
+            fail_with_hint(module, "Sidecar dump|restore pipeline failed", err.encode(), cmd=shell_cmd)
 
     module.exit_json(changed=True, msg="Restored {} tables via Sidecar".format(len(tables)))
 

@@ -1,2 +1,9 @@
 ---
+galaxy_info:
+  description: >-
+    Disaster recovery drill role: prepares artifacts, restores tables to
+    an ephemeral instance, runs validation queries, and cleans up.
+  author: Ivan Gumeniuk
+  license: MIT
+  min_ansible_version: "2.16"
 dependencies: []

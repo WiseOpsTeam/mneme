@@ -1,3 +1,10 @@
 ---
+galaxy_info:
+  description: >-
+    Installs and configures mariabackup: cron scheduling, retention,
+    compression, and Prometheus monitoring for MariaDB on RHEL/EL systems.
+  author: Ivan Gumeniuk
+  license: MIT
+  min_ansible_version: "2.16"
 dependencies: []
 # Collection-level dependencies are declared in galaxy.yml

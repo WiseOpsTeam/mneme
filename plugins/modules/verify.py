@@ -1,13 +1,17 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+# Copyright (c) 2024, Ivan Gumeniuk <WiseOps>
+# GNU General Public License v3.0+ (see LICENSES/GPL-3.0-or-later.txt or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 from __future__ import (absolute_import, division, print_function)
 
 __metaclass__ = type
 
 DOCUMENTATION = r'''
 ---
-module: wiseops_team.mneme.verify
+module: verify
 short_description: Safe backup verification module (Ephemeral Restore).
 description:
   - Spins up a temporary MariaDB instance on backup files (Sidecar).
@@ -58,7 +62,7 @@ options:
     type: str
     default: mysql
 author:
-  - Ivan Gumeniuk (IMHIO LTD)
+  - Ivan Gumeniuk (@meklon)
 '''
 
 EXAMPLES = r'''
@@ -79,7 +83,6 @@ EXAMPLES = r'''
 
 import uuid
 import random
-import subprocess
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.wiseops_team.mneme.plugins.module_utils.common import (
     get_binary, exec_sql, discover_tables, BackupSidecar, run_cmd, fail_with_hint
@@ -144,17 +147,13 @@ def run_verify(module, params):
                 temp_db_name
             ]
 
-            p1 = subprocess.Popen(dump_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            p2 = subprocess.Popen(restore_cmd, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            p1.stdout.close()
-
-            _, err_restore = p2.communicate()
-            _, err_dump = p1.communicate()
-
-            if p1.returncode != 0:
-                raise Exception(f"Dump failed: {err_dump}")
-            if p2.returncode != 0:
-                raise Exception(f"Restore failed: {err_restore}")
+            # Pipe: dump -> restore
+            # module.run_command does not support inter-process pipes natively,
+            # so we shell out intentionally for this pipeline.
+            shell_cmd = ' '.join(dump_cmd) + ' | ' + ' '.join(restore_cmd)
+            rc, _, err = module.run_command(['/bin/sh', '-c', shell_cmd])
+            if rc != 0:
+                raise Exception(f"Dump|restore pipeline failed: {err}")
 
         # 5. Run Validation Query
         val_query = params['validation_query']

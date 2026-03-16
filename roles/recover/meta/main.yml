@@ -1,2 +1,9 @@
 ---
+galaxy_info:
+  description: >-
+    Full recovery orchestrator for sidecar and direct strategies:
+    runs prepare, restore, and cleanup in a single role call.
+  author: Ivan Gumeniuk
+  license: MIT
+  min_ansible_version: "2.16"
 dependencies: []
