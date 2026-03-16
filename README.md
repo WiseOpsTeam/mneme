@@ -57,6 +57,7 @@ The collection is organized into three roles:
 | `wiseops_team.mneme.backup` | Installation, configuration, cron scheduling, retention, and monitoring. |
 | `wiseops_team.mneme.prepare` | Preparation of backup artifacts (unarchiving, permissions, `--prepare --export`). |
 | `wiseops_team.mneme.cleanup` | Removes temporary artifacts created by the prepare role. |
+| `wiseops_team.mneme.recover` | Full recovery orchestrator: prepare → restore → cleanup. Use for sidecar and direct strategies. |
 | `wiseops_team.mneme.drill` | Automated backup verification drills using ephemeral restore. |
 
 And two custom modules:
@@ -189,7 +190,22 @@ Refer to the **[Verification Guide](docs/VERIFICATION.md)** and the `wiseops_tea
 
 ## Restoring from Backup
 
-Recovery is handled via the custom `wiseops_team.mneme.restore` module and helper tasks.
+Recovery is handled via the custom `wiseops_team.mneme.restore` module and helper roles.
+
+For the common case, use the `recover` role — it handles the full
+cycle automatically:
+```yaml
+- role: wiseops_team.mneme.recover
+  vars:
+    mneme_recover_strategy: sidecar
+    mneme_recover_target_date: "2026-03-15"
+    mneme_recover_database: production_db
+    mneme_recover_table: [users]
+```
+
+For advanced scenarios (async, copy_back, multi-play), use the
+components directly as shown below.
+
 Here is a complete, compact playbook to restore a specific table from a specific date:
 
 ```yaml
@@ -208,7 +224,6 @@ Here is a complete, compact playbook to restore a specific table from a specific
     - name: Prepare Backup Artifacts
       ansible.builtin.include_role:
         name: wiseops_team.mneme.prepare
-        tasks_from: prepare
 
     # 3. Restore (Sidecar strategy: zero downtime, specific table)
     - name: Restore Table
@@ -222,6 +237,8 @@ Here is a complete, compact playbook to restore a specific table from a specific
     - name: Cleanup Temp Files
       ansible.builtin.include_role:
         name: wiseops_team.mneme.cleanup
+      vars:
+        mneme_prepare_target_date: "{{ mneme_prepare_target_date }}"
 ```
 
 For detailed scenarios (Full Recovery, Point-in-Time, Direct Restore), see the **[Disaster Recovery Runbook](docs/RECOVERY_RUNBOOK.md)**.

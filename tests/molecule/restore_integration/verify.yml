@@ -38,7 +38,7 @@
     # ------------------------------------------------------------------
     # 1. TEST PREPARE (First Run)
     # ------------------------------------------------------------------
-    - name: "TEST 1 | Run restore_prepare helper (First Run)"
+    - name: "TEST 1 | Run prepare role (First Run)"
       ansible.builtin.include_role:
         name: wiseops_team.mneme.prepare
       vars:
@@ -60,7 +60,7 @@
     # ------------------------------------------------------------------
     # 2. TEST IDEMPOTENCY (Smart Skip)
     # ------------------------------------------------------------------
-    - name: "TEST 2 | Run restore_prepare helper (Second Run)"
+    - name: "TEST 2 | Run prepare role (Second Run, idempotency)"
       ansible.builtin.include_role:
         name: wiseops_team.mneme.prepare
       vars:
@@ -105,7 +105,7 @@
     # ------------------------------------------------------------------
     # 4. TEST CLEANUP
     # ------------------------------------------------------------------
-    - name: "TEST 4 | Run cleanup helper"
+    - name: "TEST 4 | Run cleanup role"
       ansible.builtin.include_role:
         name: wiseops_team.mneme.cleanup
       vars:
@@ -116,3 +116,44 @@
         path: "{{ expected_work_dir }}"
       register: dir_stat
       failed_when: dir_stat.stat.exists
+
+    # ------------------------------------------------------------------
+    # 5. TEST RECOVER ROLE (Full Cycle via Wrapper)
+    # ------------------------------------------------------------------
+    - name: "SETUP 5 | Re-create table and data for recover test"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "{{ mneme_mysql_password | default('root') }}"
+        query:
+          - "CREATE TABLE IF NOT EXISTS {{ db_name }}.{{ table_name }} (id INT, val VARCHAR(10));"
+          - "INSERT INTO {{ db_name }}.{{ table_name }} VALUES (1, 'test');"
+
+    - name: "ACTION 5 | Drop table to simulate disaster"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "root"
+        query: "DROP TABLE {{ db_name }}.{{ table_name }};"
+
+    - name: "TEST 5 | Full recovery via recover role"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.recover
+      vars:
+        mneme_recover_strategy: sidecar
+        mneme_recover_target_date: "{{ current_date }}"
+        mneme_recover_database: "{{ db_name }}"
+        mneme_recover_table:
+          - "{{ table_name }}"
+
+    - name: "ASSERT 5 | Verify data restored"
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "root"
+        query: "SELECT count(*) as c FROM {{ db_name }}.{{ table_name }};"
+      register: recover_data_check
+      failed_when: recover_data_check.query_result[0][0].c != 1
+
+    - name: "ASSERT 5 | Verify cleanup ran (workspace gone)"
+      ansible.builtin.stat:
+        path: "{{ expected_work_dir }}"
+      register: recover_dir_stat
+      failed_when: recover_dir_stat.stat.exists

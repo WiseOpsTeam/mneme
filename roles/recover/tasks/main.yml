@@ -1,0 +1,29 @@
+---
+
+- name: Prepare backup artifacts for recovery
+  ansible.builtin.include_role:
+    name: wiseops_team.mneme.prepare
+  vars:
+    mneme_prepare_target_date: "{{ mneme_recover_target_date }}"
+    mneme_prepare_type: "{{ mneme_recover_type }}"
+
+- name: Run restore
+  wiseops_team.mneme.restore:
+    strategy: "{{ mneme_recover_strategy }}"
+    backup_dir: "{{ mneme_prepared_backup_dir }}"
+    database: "{{ mneme_recover_database | default(omit) }}"
+    table: "{{ mneme_recover_table | default(omit) }}"
+    schema_file: "{{ mneme_recover_schema_file | default(omit) }}"
+    datadir: "{{ mneme_recover_datadir }}"
+    force: "{{ mneme_recover_force }}"
+    client_bin: "{{ mneme_mariadb_bin_path }}"
+    dump_bin: "{{ mneme_mariadb_dump_bin_path }}"
+    mysqld_bin: "{{ mneme_mysqld_bin_path }}"
+    mneme_bin: "{{ mneme_bin_path }}"
+
+- name: Cleanup recovery artifacts
+  ansible.builtin.include_role:
+    name: wiseops_team.mneme.cleanup
+  vars:
+    mneme_prepare_target_date: "{{ mneme_recover_target_date }}"
+  when: not mneme_recover_skip_cleanup
