@@ -43,7 +43,7 @@
         name: wiseops_team.mneme.prepare
         tasks_from: prepare
       vars:
-        mneme_restore_target_date: "{{ current_date }}"
+        mneme_prepare_target_date: "{{ current_date }}"
 
     - name: "ASSERT 1 | Check facts and files"
       ansible.builtin.assert:
@@ -66,7 +66,7 @@
         name: wiseops_team.mneme.prepare
         tasks_from: prepare
       vars:
-        mneme_restore_target_date: "{{ current_date }}"
+        mneme_prepare_target_date: "{{ current_date }}"
 
     - name: "ASSERT 2 | Verify Idempotency (Marker shouldn't be touched)"
       ansible.builtin.stat:
@@ -112,7 +112,7 @@
         name: wiseops_team.mneme.prepare
         tasks_from: cleanup
       vars:
-        mneme_restore_target_date: "{{ current_date }}"
+        mneme_prepare_target_date: "{{ current_date }}"
 
     - name: "ASSERT 4 | Verify directory is gone"
       ansible.builtin.stat:

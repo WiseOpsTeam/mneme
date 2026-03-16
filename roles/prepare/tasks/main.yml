@@ -1,0 +1,4 @@
+---
+
+- name: Prepare backup artifacts for restoration
+  ansible.builtin.include_tasks: prepare.yml

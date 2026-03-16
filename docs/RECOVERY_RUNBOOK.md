@@ -36,9 +36,9 @@ tasks:
       tasks_from: prepare
     vars:
       # Optional: Date of the backup (YYYY-MM-DD) or the default 'latest' will be used
-      mneme_restore_target_date: "2025-07-20"
+      mneme_prepare_target_date: "2025-07-20"
       # Optional: 'daily' (default), 'weekly', 'monthly'
-      mneme_restore_type: "daily"
+      mneme_prepare_type: "daily"
 
   # The helper sets these facts for you:
   # - mneme_prepared_backup_dir
@@ -81,7 +81,7 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
     name: wiseops_team.mneme.prepare
     tasks_from: prepare
   vars:
-    mneme_restore_target_date: "latest"
+    mneme_prepare_target_date: "latest"
     
 - name: Restore 'users' table safely
   wiseops_team.mneme.restore:
@@ -108,7 +108,7 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
     name: wiseops_team.mneme.prepare
     tasks_from: prepare
   vars:
-    mneme_restore_target_date: "latest"
+    mneme_prepare_target_date: "latest"
     
 - name: Restore entire database (Auto-Discovery)
   wiseops_team.mneme.restore:
@@ -133,7 +133,7 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
 ```yaml
 - name: FULL RESTORE (COPY-BACK)
   vars:
-    mneme_restore_target_date: "latest"
+    mneme_prepare_target_date: "latest"
   block:
     - name: Stop MariaDB
       ansible.builtin.service: name=mariadb state=stopped
@@ -176,7 +176,7 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
 ```yaml
 - name: FULL RESTORE (MOVE-BACK)
   vars:
-    mneme_restore_target_date: "latest"
+    mneme_prepare_target_date: "latest"
   block:
     - name: Stop MariaDB
       ansible.builtin.service: name=mariadb state=stopped
@@ -216,7 +216,7 @@ MariaDB disables Foreign Key checks during `IMPORT TABLESPACE`.
 To restore the absolute latest available state without specifying a date manually, use `latest`.
 The role implements a **Safe Discovery Strategy**:
 
-1.  **Scoped:** Respects `mneme_restore_type`. If you request `daily`, it ignores newer `weekly` backups to prevent logical mismatches.
+1.  **Scoped:** Respects `mneme_prepare_type`. If you request `daily`, it ignores newer `weekly` backups to prevent logical mismatches.
 2.  **Atomic Safety:** Prioritizes completed backups with verified `.sha256` markers. It effectively protects against Race Conditions (e.g., attempting to restore while a new backup is still being written).
 3.  **Fallback:** If checksum generation is disabled, it falls back to the newest raw `.tar.gz` file (with a warning).
 
@@ -305,7 +305,7 @@ To remove the temporary unarchived data and save disk space, use the `restore_cl
         tasks_from: cleanup
       vars:
         # Must match the date used in preparation
-        mneme_restore_target_date: "2025-07-20"
+        mneme_prepare_target_date: "2025-07-20"
 ```
 
 ## 6. Troubleshooting

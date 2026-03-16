@@ -1,0 +1,15 @@
+---
+# Call this at the end of your playbook (in 'always' or 'post_tasks')
+
+- name: "RESTORE_CLEANUP | Validate input"
+  ansible.builtin.assert:
+    that:
+      - mneme_prepare_target_date is defined
+      - mneme_prepare_target_date | length > 0
+    fail_msg: "variable 'mneme_prepare_target_date' is required for cleanup."
+
+- name: "RESTORE_CLEANUP | Remove working directory"
+  ansible.builtin.file:
+    path: "{{ mneme_restore_runtime_work_dir | default(mneme_prepare_work_dir) }}"
+    state: absent
+  when: mneme_prepare_work_dir is defined

@@ -722,8 +722,8 @@
             tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
-            mneme_restore_target_date: "latest"
-            mneme_restore_type: "daily"
+            mneme_prepare_target_date: "latest"
+            mneme_prepare_type: "daily"
 
         - name: "ASSERT | Fallback selected the raw newest file (2025-05-04)"
           ansible.builtin.assert:
@@ -749,8 +749,8 @@
             tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
-            mneme_restore_target_date: "latest"
-            mneme_restore_type: "daily"
+            mneme_prepare_target_date: "latest"
+            mneme_prepare_type: "daily"
 
         - name: "ASSERT | Safe Mode selected the verified file (2025-05-03)"
           ansible.builtin.assert:
@@ -768,8 +768,8 @@
             tasks_from: prepare
           vars:
             mneme_archive_dir: "/tmp/mock_archives"
-            mneme_restore_target_date: "latest"
-            mneme_restore_type: "daily"
+            mneme_prepare_target_date: "latest"
+            mneme_prepare_type: "daily"
           ignore_errors: true
 
         - name: "ASSERT | Scoped Logic ignored the Weekly backup"
@@ -807,8 +807,8 @@
                 tasks_from: prepare
               vars:
                 mneme_archive_dir: "/tmp/integrity_test"
-                mneme_restore_target_date: "latest"
-                mneme_restore_type: "daily"
+                mneme_prepare_target_date: "latest"
+                mneme_prepare_type: "daily"
 
             - name: "FAIL | Role succeeded unexpectedly"
               ansible.builtin.fail:

@@ -123,8 +123,8 @@ These variables are used by the `wiseops_team.mneme.prepare` role.
 
 | **Variable**                          | **Default**                                     | **Description**                                                                                                                       |
 |:--------------------------------------|:------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------|
-| `mneme_restore_target_date`     | `latest`                                        | The date of the backup to restore (Format: `YYYY-MM-DD`). Must be provided at runtime otherwise the latest valid backup will be used. |
-| `mneme_restore_type`            | `daily`                                         | The retention contour type to look for (`daily`, `weekly`, `monthly`).                                                                |
-| `mneme_restore_work_dir`        | `{{ mneme_temp_dir }}/restore_{{ date }}` | Directory where the backup will be unarchived. Can be overridden if you need to use a different disk partition.                       |
-| `mneme_restore_prepare_timeout` | `14400`                                         | Timeout in seconds for the `mariadb-backup --prepare` step (default: 4 hours).                                                        |
+| `mneme_prepare_target_date`     | `latest`                                        | The date of the backup to restore (Format: `YYYY-MM-DD`). Must be provided at runtime otherwise the latest valid backup will be used. |
+| `mneme_prepare_type`            | `daily`                                         | The retention contour type to look for (`daily`, `weekly`, `monthly`).                                                                |
+| `mneme_prepare_work_dir`        | `{{ mneme_temp_dir }}/restore_{{ date }}` | Directory where the backup will be unarchived. Can be overridden if you need to use a different disk partition.                       |
+| `mneme_prepare_timeout` | `14400`                                         | Timeout in seconds for the `mariadb-backup --prepare` step (default: 4 hours).                                                        |
 | `mneme_system_user`             | `mysql`                                         | System user that owns the database files. Crucial for permission fixing during restore.                                               |

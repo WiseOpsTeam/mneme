@@ -3,7 +3,7 @@
 
 - name: Ensure lib directory exists
   ansible.builtin.file:
-    path: /usr/local/lib/mariabackup
+    path: /usr/local/lib/mneme
     state: directory
     owner: "{{ mneme_backup_script_owner }}"
     group: "{{ mneme_backup_script_group }}"

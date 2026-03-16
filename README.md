@@ -198,7 +198,7 @@ Here is a complete, compact playbook to restore a specific table from a specific
   become: true
   vars:
     # 1. Define the target
-    mneme_restore_target_date: "2025-10-20"
+    mneme_prepare_target_date: "2025-10-20"
     target_db: "production_db"
     target_table: "users"
 
