@@ -121,6 +121,7 @@ cleanup() {
     rm -rf "${BACKUP_DIR:?}/${BACKUP_NAME:?}" || true
     rm -rf "${BACKUP_DIR:?}/${BACKUP_SCHEME_NAME:?}" || true
     rm -f "${PID_FILE}" || true
+    rm -f "${COMPRESSED_BACKUP}.tmp" || true
     log "Cleanup completed."
     manage_retention_contours "$CONTOUR_TYPE"
     log "Emergency retention contours cleanup completed."
@@ -192,17 +193,46 @@ log "Preparing backup: ${BACKUP_NAME}"
 
 {% if mneme_compress %}
 log "Compressing backup using pigz: ${COMPRESSED_BACKUP}"
-nice -n "${NICENUM}" sh -c "tar -cf - -C '${BACKUP_DIR}' '${BACKUP_NAME}' | pigz -{{ mneme_compression_level }}{% if mneme_pigz_processes is defined %} -p {{ mneme_pigz_processes }}{% endif %} > '${COMPRESSED_BACKUP}'"
+nice -n "${NICENUM}" sh -c "tar -cf - -C '${BACKUP_DIR}' '${BACKUP_NAME}' | pigz -{{ mneme_compression_level }}{% if mneme_pigz_processes is defined %} -p {{ mneme_pigz_processes }}{% endif %} > '${COMPRESSED_BACKUP}.tmp'"
+
+{% if mneme_verify_archive %}
+log "Verifying archive integrity..."
+if ! tar -tzf "${COMPRESSED_BACKUP}.tmp" > /dev/null 2>&1; then
+    log "ERROR: Archive verification failed: ${COMPRESSED_BACKUP}"
+    rm -f "${COMPRESSED_BACKUP}.tmp"
+    fail_and_exit
+fi
+{% endif %}
+
 {% else %}
 COMPRESSED_BACKUP="${BACKUP_DIR}/${BACKUP_NAME}.tar"
 log "Creating tar archive: ${COMPRESSED_BACKUP}"
-tar -cf "${COMPRESSED_BACKUP}" -C "${BACKUP_DIR}" "${BACKUP_NAME}"
+tar -cf "${COMPRESSED_BACKUP}.tmp" -C "${BACKUP_DIR}" "${BACKUP_NAME}"
+
+{% if mneme_verify_archive %}
+log "Verifying archive integrity..."
+if ! tar -tf "${COMPRESSED_BACKUP}.tmp" > /dev/null 2>&1; then
+    log "ERROR: Archive verification failed: ${COMPRESSED_BACKUP}"
+    rm -f "${COMPRESSED_BACKUP}.tmp"
+    fail_and_exit
+fi
 {% endif %}
+
+{% endif %}
+
+mv "${COMPRESSED_BACKUP}.tmp" "${COMPRESSED_BACKUP}"
 chmod 600 "${COMPRESSED_BACKUP}"
 
 # Remove the uncompressed backup directory to save space
 log "Removing uncompressed backup directory: ${BACKUP_DIR}/${BACKUP_NAME}"
 rm -rf "${BACKUP_DIR:?}/${BACKUP_NAME:?}"
+
+{% if mneme_generate_checksum %}
+# Generate checksum
+sha256sum "${COMPRESSED_BACKUP}" > "${COMPRESSED_BACKUP}.sha256"
+chmod 600 "${COMPRESSED_BACKUP}.sha256"
+log "Checksum saved: ${COMPRESSED_BACKUP}.sha256"
+{% endif %}
 
 {% if mneme_databases_schemes_include | length > 0 %}
 # Add the schemas without data for the predefined list of databases
@@ -219,23 +249,6 @@ done
 log "Compressing schemas backup using pigz: ${COMPRESSED_SCHEMA_BACKUP}"
 tar -cf - -C "${BACKUP_DIR}" "${BACKUP_SCHEME_NAME}" | pigz -{{ mneme_compression_level }}{% if mneme_pigz_processes is defined %} -p {{ mneme_pigz_processes }}{% endif %} > "${COMPRESSED_SCHEMA_BACKUP}"
 chmod 600 "${COMPRESSED_SCHEMA_BACKUP}"
-
-{% if mneme_verify_archive %}
-# Verify archive integrity
-log "Verifying archive integrity..."
-if ! tar -tzf "${COMPRESSED_BACKUP}" > /dev/null 2>&1; then
-    log "ERROR: Archive verification failed: ${COMPRESSED_BACKUP}"
-    rm -f "${COMPRESSED_BACKUP}"
-    fail_and_exit
-fi
-{% endif %}
-
-{% if mneme_generate_checksum %}
-# Generate checksum
-sha256sum "${COMPRESSED_BACKUP}" > "${COMPRESSED_BACKUP}.sha256"
-chmod 600 "${COMPRESSED_BACKUP}.sha256"
-log "Checksum saved: ${COMPRESSED_BACKUP}.sha256"
-{% endif %}
 
 # Remove the uncompressed schemas backup directory
 log "Removing uncompressed schemas backup directory: ${BACKUP_DIR}/${BACKUP_SCHEME_NAME}"
