@@ -19,7 +19,7 @@
     backup_dir: "{{ mneme_prepared_backup_dir }}"
     database: "{{ mneme_recover_database | default(omit) }}"
     table: "{{ mneme_recover_table | default(omit) }}"
-    schema_file: {{ _schema_file_stat.stat.path if (_schema_file_stat.stat.exists | default(false)) else omit }}
+    schema_file: "{{ _schema_file_stat.stat.path if (_schema_file_stat.stat.exists | default(false)) else omit }}"
     datadir: "{{ mneme_recover_datadir }}"
     force: "{{ mneme_recover_force }}"
     client_bin: "{{ mneme_mariadb_bin_path }}"
