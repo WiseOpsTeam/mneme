@@ -20,6 +20,7 @@ manage_retention() {
     if [ "$contour_count" -eq 0 ]; then
         log "Retention count is 0. Deleting all backups matching the pattern."
         find "${ARCHIVE_DIR}" -maxdepth 1 -type f -regextype posix-extended -regex "${regex_pattern}" -print -delete
+        find "${ARCHIVE_DIR}" -maxdepth 1 -type f -regextype posix-extended -regex "${regex_pattern}\.sha256" -print -delete
         log "Deletion completed."
         return
     fi
@@ -44,6 +45,7 @@ manage_retention() {
     for old_backup in "${backups_to_delete[@]}"; do
         log "Deleting outdated backup: ${old_backup}"
         rm -f "${old_backup}" || log "ERROR: Failed to delete: ${old_backup}"
+        rm -f "${old_backup}.sha256" || log "ERROR: Failed to delete checksum: ${old_backup}.sha256"
     done
 
     log "Retention management for '${backup_prefix_to_match}*' completed."
