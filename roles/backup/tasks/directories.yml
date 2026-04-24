@@ -1,34 +1,26 @@
 ---
 # Handle directory creation
 
-- name: Ensure backup directory exists
+- name: Create directories without metadata
   ansible.builtin.file:
-    path: "{{ mneme_backup_dir }}"
+    path: "{{ item }}"
     state: directory
-    owner: "{{ mneme_backup_script_owner }}"
-    group: "{{ mneme_backup_script_group }}"
-    mode: '0755'
+  loop:
+    - "{{ mneme_backup_dir }}"
+    - "{{ mneme_log_dir }}"
+    - "{{ mneme_temp_dir }}"
+    - "{{ mneme_archive_dir }}"
 
-- name: Ensure log directory exists
+- name: Try to set permissions (can fail on network shares)
   ansible.builtin.file:
-    path: "{{ mneme_log_dir }}"
+    path: "{{ item }}"
     state: directory
     owner: "{{ mneme_backup_script_owner }}"
     group: "{{ mneme_backup_script_group }}"
     mode: '0755'
-
-- name: Ensure temp directory exists
-  ansible.builtin.file:
-    path: "{{ mneme_temp_dir }}"
-    state: directory
-    owner: "{{ mneme_backup_script_owner }}"
-    group: "{{ mneme_backup_script_group }}"
-    mode: '0755'
-
-- name: Ensure archive directory exists
-  ansible.builtin.file:
-    path: "{{ mneme_archive_dir }}"
-    state: directory
-    owner: "{{ mneme_backup_script_owner }}"
-    group: "{{ mneme_backup_script_group }}"
-    mode: '0755'
+  loop:
+    - "{{ mneme_backup_dir }}"
+    - "{{ mneme_log_dir }}"
+    - "{{ mneme_temp_dir }}"
+    - "{{ mneme_archive_dir }}"
+  ignore_errors: true

@@ -1,3 +1,6 @@
+## [2.2.2] - 2026-04-24
+Changed directory logic creation. Now the permission change may fail. It might be normal on NFS-shares
+
 ## [2.2.1] - 2026-04-24
 Added the dynamic disk space pre-check before backup start
 Queries information_schema to determine actual MySQL data size (excludes binlogs, relay logs, redo logs) and verifies sufficient free space on backup and archive partitions before starting.
