@@ -19,7 +19,6 @@ The recommended way to install is via a `requirements.yml` file:
 ---
 collections:
   - name: wiseops_team.mneme
-    source: https://galaxy.ansible.com
 ```
 
 Install it using ansible-galaxy:
