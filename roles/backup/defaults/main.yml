@@ -108,6 +108,12 @@ mneme_epel_repo_archive_url: "https://archives.fedoraproject.org/pub/archive/epe
 mneme_epel_repo_url: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm"
 mneme_epel_repo_key_url: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-{{ ansible_distribution_major_version }}"
 
+# Disk space pre-check thresholds (percentage of MySQL data dir size)
+# Raw backup includes ~5% overhead for --prepare --export
+mneme_precheck_raw_percent: 105
+# Compressed archive is typically ~15-20% of raw data
+mneme_precheck_compressed_percent: 20
+
 # Xtrabackup compatibility. If true, it will omit the installation of mariabackup package, so it wouldn't fail.
 # You'll have to install the xtrabackup package separately.
 mneme_xtrabackup_compatibility: false

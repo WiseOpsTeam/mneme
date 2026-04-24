@@ -152,6 +152,25 @@ mneme_ram_hard_limit: "4G"
 - `mneme_ram_soft_limit`: A soft limit (`MemoryHigh`). The kernel will start reclaiming memory aggressively if the process exceeds this, but it won't be killed.
 - `mneme_ram_hard_limit`: A hard limit (`MemoryMax`). If the process exceeds this, the Out-of-Memory (OOM) killer will terminate it, preventing swapping.
 
+### Disk Space Pre-Check
+
+Before starting a backup, the wrapper script automatically verifies that enough disk space is available. It queries MySQL's `information_schema` to determine the actual data size (excluding binlogs, relay logs, and redo logs), then checks available space on the backup and archive partitions.
+
+```yaml
+# Percentage of MySQL data size required for the raw backup copy.
+# Default 105% accounts for ~5% growth during --prepare --export.
+mneme_precheck_raw_percent: 105
+
+# Percentage of MySQL data size required for the compressed archive.
+# Default 20% covers typical pigz compression ratios.
+mneme_precheck_compressed_percent: 20
+```
+
+**How it works:**
+- If `BACKUP_DIR` and `ARCHIVE_DIR` are on the **same partition**, the check requires space for both raw + compressed simultaneously (raw + compressed percentages combined).
+- If they are on **different partitions**, each is checked independently against its own threshold.
+- On failure, the backup is **not started**, a failure metric is written to Prometheus (enabling instant alerting), and the script exits cleanly.
+
 ### Partial and Schema-Only Backups
 
 You can fine-tune your backups to include or exclude specific databases and tables. This is useful for large environments or for backing up only critical data.

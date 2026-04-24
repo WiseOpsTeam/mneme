@@ -54,6 +54,15 @@
 | `mneme_safe_slave_autorestore_replication_query` | string   | `START SLAVE;` | Query for the forcefull replication restart. Might be changed according your environment if needed                                                                                                                                       |
 | `mneme_block_on_master`                          | bool     | `false`        | If true it will add master detection to the cron job, preventing the start. Useful when you want to set up cronjobs for several servers that may change the roles                                                                        |
 
+### Disk Space Pre-Check
+
+| **Variable**                       | **Type** | **Default** | **Description**                                                                                                                    |
+|:-----------------------------------|:---------|:------------|:-----------------------------------------------------------------------------------------------------------------------------------|
+| `mneme_precheck_raw_percent`       | integer  | `105`       | Required free space for raw backup as percentage of MySQL data size. Default 105% accounts for ~5% growth during `--prepare`.      |
+| `mneme_precheck_compressed_percent`| integer  | `20`        | Required free space for compressed archive as percentage of MySQL data size. Default 20% covers typical pigz compression ratios.   |
+
+The pre-check queries `information_schema.tables` to determine the actual data size (excluding binlogs, relay logs, redo logs). If `BACKUP_DIR` and `ARCHIVE_DIR` are on the same partition, the combined threshold is used. If on different partitions, each is checked independently. On failure, a Prometheus failure metric (`mneme_last_status=0`) is written for instant alerting.
+
 ### Archive Verification
 
 | **Variable**              | **Type** | **Default** | **Description**                                                                                                        |

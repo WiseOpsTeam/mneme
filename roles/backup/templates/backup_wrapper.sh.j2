@@ -152,6 +152,66 @@ trap cleanup EXIT
 trap fail_and_exit SIGINT SIGTERM ERR
 
 # ============================
+# Disk Space Pre-Check
+# ============================
+log "Running disk space pre-check..."
+
+# Query MySQL for actual data size (excludes binlogs, relay logs, redo logs)
+MYSQL_SIZE_BYTES=$({{ mneme_mariadb_bin_path }} -u "{{ mneme_mysql_user }}" --host="{{ mneme_mysql_host }}" --port="{{ mneme_mysql_port }}" -NBe \
+    "SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema NOT IN ('information_schema', 'performance_schema', 'sys');" 2>/dev/null)
+if [ -z "${MYSQL_SIZE_BYTES}" ] || ! [[ "${MYSQL_SIZE_BYTES}" =~ ^[0-9]+$ ]] || [ "${MYSQL_SIZE_BYTES}" -eq 0 ]; then
+    log "ERROR: Failed to determine MySQL data size via information_schema"
+    fail_and_exit
+fi
+MYSQL_SIZE_KB=$(( MYSQL_SIZE_BYTES / 1024 ))
+
+# Determine partitions for backup and archive directories
+BACKUP_PARTITION=$(df -Pk "${BACKUP_DIR}" | awk 'NR==2 {print $1}')
+ARCHIVE_PARTITION=$(df -Pk "${ARCHIVE_DIR}" | awk 'NR==2 {print $1}')
+BACKUP_AVAIL_KB=$(df -Pk "${BACKUP_DIR}" | awk 'NR==2 {print $4}')
+ARCHIVE_AVAIL_KB=$(df -Pk "${ARCHIVE_DIR}" | awk 'NR==2 {print $4}')
+
+if [ -z "${BACKUP_AVAIL_KB}" ] || ! [[ "${BACKUP_AVAIL_KB}" =~ ^[0-9]+$ ]]; then
+    log "ERROR: Failed to determine available space on ${BACKUP_DIR}"
+    fail_and_exit
+fi
+if [ -z "${ARCHIVE_AVAIL_KB}" ] || ! [[ "${ARCHIVE_AVAIL_KB}" =~ ^[0-9]+$ ]]; then
+    log "ERROR: Failed to determine available space on ${ARCHIVE_DIR}"
+    fail_and_exit
+fi
+
+# Raw backup ≈ data size (InnoDB tablespaces), prepare can add ~5%.
+# Compressed archive ≈ 15-20% of raw depending on data compressibility.
+# At peak, raw + compressed coexist on disk before raw is deleted.
+RAW_REQUIRED_KB=$(( MYSQL_SIZE_KB * {{ mneme_precheck_raw_percent }} / 100 ))
+COMPRESSED_REQUIRED_KB=$(( MYSQL_SIZE_KB * {{ mneme_precheck_compressed_percent }} / 100 ))
+
+if [ "${BACKUP_PARTITION}" = "${ARCHIVE_PARTITION}" ]; then
+    # Same partition: need space for raw + compressed simultaneously
+    TOTAL_REQUIRED_KB=$(( RAW_REQUIRED_KB + COMPRESSED_REQUIRED_KB ))
+    log "Disk pre-check (same partition): MySQL data=${MYSQL_SIZE_KB}KB, available=${BACKUP_AVAIL_KB}KB, required=${TOTAL_REQUIRED_KB}KB (raw+compressed)"
+    if [ "${BACKUP_AVAIL_KB}" -lt "${TOTAL_REQUIRED_KB}" ]; then
+        log "ERROR: Not enough disk space. Available: ${BACKUP_AVAIL_KB}KB < Required: ${TOTAL_REQUIRED_KB}KB. Backup aborted."
+        fail_and_exit
+    fi
+else
+    # Different partitions: check each independently
+    log "Disk pre-check (separate partitions): MySQL data=${MYSQL_SIZE_KB}KB"
+    log "  BACKUP_DIR (${BACKUP_PARTITION}): available=${BACKUP_AVAIL_KB}KB, required=${RAW_REQUIRED_KB}KB (raw+prepare)"
+    log "  ARCHIVE_DIR (${ARCHIVE_PARTITION}): available=${ARCHIVE_AVAIL_KB}KB, required=${COMPRESSED_REQUIRED_KB}KB (compressed)"
+    if [ "${BACKUP_AVAIL_KB}" -lt "${RAW_REQUIRED_KB}" ]; then
+        log "ERROR: Not enough space on BACKUP_DIR. Available: ${BACKUP_AVAIL_KB}KB < Required: ${RAW_REQUIRED_KB}KB. Backup aborted."
+        fail_and_exit
+    fi
+    if [ "${ARCHIVE_AVAIL_KB}" -lt "${COMPRESSED_REQUIRED_KB}" ]; then
+        log "ERROR: Not enough space on ARCHIVE_DIR. Available: ${ARCHIVE_AVAIL_KB}KB < Required: ${COMPRESSED_REQUIRED_KB}KB. Backup aborted."
+        fail_and_exit
+    fi
+fi
+
+log "Disk pre-check passed."
+
+# ============================
 # Backup Process
 # ============================
 
