@@ -1,3 +1,8 @@
+## [2.2.1] - 2026-04-24
+Added the dynamic disk space pre-check before backup start
+Queries information_schema to determine actual MySQL data size (excludes binlogs, relay logs, redo logs) and verifies sufficient free space on backup and archive partitions before starting.
+Supports same-partition and split-partition layouts with configurable thresholds (mneme_precheck_raw_percent, mneme_precheck_compressed_percent). On failure, writes Prometheus metric for instant alerting
+
 ## [2.2.0] - 2026-03-16
 
 ### Breaking Changes
