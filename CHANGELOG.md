@@ -1,3 +1,8 @@
+## [2.2.3] - 2026-11-06
+Fixed errant GTIDs on MySQL replicas from the schema dump. With `--single-transaction` on a GTID server, `mysqldump`
+ran a binlogged `FLUSH TABLES` under the replica's own `server_uuid` on every backup run.
+The schema dump now passes `--set-gtid-purged=OFF` when the dump client supports it; `mariadb-dump` is unchanged.
+
 ## [2.2.2] - 2026-04-24
 Changed directory logic creation. Now the permission change may fail. It might be normal on NFS-shares
 
