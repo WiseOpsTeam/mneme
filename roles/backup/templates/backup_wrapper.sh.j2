@@ -299,10 +299,19 @@ log "Checksum saved: ${COMPRESSED_BACKUP}.sha256"
 log "Dumping schemas for databases: {{ mneme_databases_schemes_include | join(', ') }}"
 mkdir -p "${BACKUP_DIR}/${BACKUP_SCHEME_NAME}" || { log "Failed to create schema backup directory. Exiting."; fail_and_exit; }
 
+# With --single-transaction on a GTID server, MySQL's mysqldump runs a binlogged FLUSH TABLES to read
+# gtid_executed for GTID_PURGED. On a replica that adds an errant GTID under the replica's own server_uuid
+# on every run. A schema-only dump needs no GTID state, so disable it where the client has the option
+# (mariadb-dump does not). grep without -q reads the whole help text, so pipefail sees no SIGPIPE.
+SCHEMA_DUMP_OPTS=()
+if "${MYSQLDUMP_CMD}" --help 2>/dev/null | grep -- '--set-gtid-purged' >/dev/null; then
+    SCHEMA_DUMP_OPTS+=("--set-gtid-purged=OFF")
+fi
+
 # shellcheck disable=SC2043
 for db in {{ mneme_databases_schemes_include | join(' ') }}; do
     log "Dumping schema for database: $db"
-    "${MYSQLDUMP_CMD}" -u "{{ mneme_mysql_user }}" --host="{{ mneme_mysql_host }}" --port="{{ mneme_mysql_port }}" --no-data --single-transaction --databases "$db" > "${BACKUP_DIR}/${BACKUP_SCHEME_NAME}/${db}_schema.sql"
+    "${MYSQLDUMP_CMD}" -u "{{ mneme_mysql_user }}" --host="{{ mneme_mysql_host }}" --port="{{ mneme_mysql_port }}" --no-data --single-transaction ${SCHEMA_DUMP_OPTS[@]+"${SCHEMA_DUMP_OPTS[@]}"} --databases "$db" > "${BACKUP_DIR}/${BACKUP_SCHEME_NAME}/${db}_schema.sql"
 done
 
 # Compress the schemas backup
