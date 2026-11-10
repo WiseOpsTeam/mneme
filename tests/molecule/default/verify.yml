@@ -468,3 +468,74 @@
       ansible.builtin.file:
         path: /tmp/locked_backup_dir
         state: absent
+
+# The schema dump passes --set-gtid-purged=OFF only to a dump client that has the option (MySQL's mysqldump),
+# so a replica's daily backup does not write errant GTIDs; mariadb-dump has no such option and must not get it.
+# The test image runs MariaDB only, so both clients are shims around the real mariadb-dump that log their
+# arguments: one advertises the option in --help like mysqldump and drops it before calling mariadb-dump.
+- name: "TEST SUITE: Schema dump GTID option"
+  hosts: all
+  become: true
+  vars:
+    schema_shim_dir: /usr/local/libexec/mneme-test
+    schema_shim_log: /tmp/mneme_schema_dump_calls.log
+    mneme_archive_dir: /home/data/mneme_backups/archive
+  tasks:
+    - name: "SETUP | Shim directory"
+      ansible.builtin.file:
+        path: "{{ schema_shim_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: "SETUP | Dump client shims"
+      ansible.builtin.copy:
+        dest: "{{ schema_shim_dir }}/{{ item.name }}"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          # Test shim: {{ item.description }}
+          if [ "${1:-}" = "--help" ]; then
+              /bin/mariadb-dump --help
+              {{ item.help_extra }}
+              exit 0
+          fi
+          echo "$*" >> {{ schema_shim_log }}
+          args=()
+          for a in "$@"; do
+              [ "$a" = "--set-gtid-purged=OFF" ] || args+=("$a")
+          done
+          exec /bin/mariadb-dump "${args[@]}"
+      loop:
+        - name: mysqldump-like
+          description: advertises --set-gtid-purged in --help as MySQL's mysqldump does
+          help_extra: "echo '  --set-gtid-purged=name  Add SET @@GLOBAL.GTID_PURGED to the output.'"
+        - name: mariadb-dump-like
+          description: plain mariadb-dump --help, without --set-gtid-purged
+          help_extra: ":"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "RUN | Schema dump cases"
+      ansible.builtin.include_tasks: tasks/schema_dump_case.yml
+      loop:
+        - name: mysqldump-like client
+          shim: "{{ schema_shim_dir }}/mysqldump-like"
+          expect_gtid_off: true
+        - name: mariadb-dump-like client
+          shim: "{{ schema_shim_dir }}/mariadb-dump-like"
+          expect_gtid_off: false
+      loop_control:
+        loop_var: schema_case
+        label: "{{ schema_case.name }}"
+
+    - name: "CLEANUP | Restore the backup role with the default dump client"
+      ansible.builtin.include_role:
+        name: wiseops_team.mneme.backup
+
+    - name: "CLEANUP | Remove shims and call log"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ schema_shim_dir }}"
+        - "{{ schema_shim_log }}"

@@ -1,0 +1,67 @@
+---
+# One schema-dump case for the "Schema dump GTID option" suite in verify.yml.
+# Expects `schema_case` with: name, shim (path of the dump client wrapper), expect_gtid_off (bool).
+
+- name: "SETUP [{{ schema_case.name }}] | Reset the dump client call log"
+  ansible.builtin.file:
+    path: "{{ schema_shim_log }}"
+    state: absent
+
+- name: "SETUP [{{ schema_case.name }}] | Remove schema archives left by earlier runs"
+  ansible.builtin.shell: rm -f {{ mneme_archive_dir }}/mneme_schema_daily_*.tar.gz
+  changed_when: false
+
+- name: "SETUP [{{ schema_case.name }}] | Deploy the backup role with the shim as dump client"
+  ansible.builtin.include_role:
+    name: wiseops_team.mneme.backup
+  vars:
+    mneme_mariadb_dump_bin_path: "{{ schema_case.shim }}"
+    mneme_databases_schemes_include: [test_db]
+
+- name: "EXECUTE [{{ schema_case.name }}] | Run daily backup"
+  ansible.builtin.command: /usr/local/bin/mneme_wrapper.sh --type daily
+  register: schema_backup_run
+  changed_when: true
+  failed_when: schema_backup_run.rc != 0
+
+- name: "READ [{{ schema_case.name }}] | Dump client calls"
+  ansible.builtin.slurp:
+    src: "{{ schema_shim_log }}"
+  register: schema_shim_calls
+
+- name: "ASSERT [{{ schema_case.name }}] | --set-gtid-purged=OFF is passed only when the client supports it"
+  vars:
+    calls: "{{ (schema_shim_calls.content | b64decode).splitlines() | select('search', '--no-data') | list }}"
+  ansible.builtin.assert:
+    that:
+      - calls | length == 1
+      - "'--databases test_db' in calls[0]"
+      - "('--set-gtid-purged=OFF' in calls[0]) == schema_case.expect_gtid_off"
+    fail_msg: "Schema dump call: {{ calls }}"
+    success_msg: "PASS: {{ calls[0] }}"
+
+- name: "READ [{{ schema_case.name }}] | List the schema archive"
+  ansible.builtin.shell: |
+    set -o pipefail
+    tar -tzf "$(ls -t {{ mneme_archive_dir }}/mneme_schema_daily_*.tar.gz | head -n 1)"
+  args:
+    executable: /bin/bash
+  register: schema_archive_list
+  changed_when: false
+
+- name: "ASSERT [{{ schema_case.name }}] | The schema archive holds the dump of test_db"
+  ansible.builtin.assert:
+    that:
+      - schema_archive_list.stdout_lines | select('search', 'test_db_schema.sql$') | list | length == 1
+    fail_msg: "Archive content: {{ schema_archive_list.stdout_lines }}"
+
+- name: "ASSERT [{{ schema_case.name }}] | The dump is a real schema of test_db"
+  ansible.builtin.shell: |
+    set -o pipefail
+    tar -xzOf "$(ls -t {{ mneme_archive_dir }}/mneme_schema_daily_*.tar.gz | head -n 1)" --wildcards '*/test_db_schema.sql' \
+      | grep -c 'CREATE TABLE `test_table`'
+  args:
+    executable: /bin/bash
+  register: schema_dump_tables
+  changed_when: false
+  failed_when: schema_dump_tables.stdout | int != 1
